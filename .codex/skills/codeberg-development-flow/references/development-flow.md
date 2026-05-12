@@ -8,10 +8,19 @@ git remote -v
 # github  https://github.com/peezy-tech/codex-flows.git
 ```
 
-Use Codeberg for day-to-day pushes:
+`main` should track Codeberg:
 
 ```bash
-git push origin main
+git branch --set-upstream-to=origin/main main
+git status --short --branch
+# ## main...origin/main
+```
+
+Use Codeberg for day-to-day work:
+
+```bash
+git pull
+git push
 ```
 
 Use GitHub only to run npm trusted publishing:
@@ -46,12 +55,32 @@ git config --global user.signingkey E3B0D5FB2E5CF11FAFB2EA113BB8E7D3B968A324
 
 `forgejo-cli` is installed as `fj`.
 
-After a Codeberg application token exists:
+The configured Codeberg login should be visible as `matamune@codeberg.org`:
 
 ```bash
-fj auth add-key <codeberg-username> <token>
-fj auth use-ssh true
-fj auth list
+fj --host codeberg.org auth list
+```
+
+If authentication needs to be recreated:
+
+```bash
+fj --host codeberg.org auth add-key matamune <token>
+fj --host codeberg.org auth use-ssh true
+```
+
+Create the organization repo when missing:
+
+```bash
+fj --host codeberg.org org repo create peezy-tech codex-flows \
+  -d "Public monorepo for @peezy.tech/codex-flows" \
+  -S true
+```
+
+Verify the repository:
+
+```bash
+fj --host codeberg.org repo view peezy-tech/codex-flows
+git ls-remote origin HEAD refs/heads/main
 ```
 
 ## Package Release Gate
@@ -69,3 +98,10 @@ Verify npm after GitHub Actions publishing:
 npm dist-tag ls @peezy.tech/codex-flows
 npm view @peezy.tech/codex-flows version repository --json
 ```
+
+## Current Constructed State
+
+- Codeberg repo: `https://codeberg.org/peezy-tech/codex-flows`
+- GitHub mirror: `https://github.com/peezy-tech/codex-flows`
+- `origin/main` and `github/main` should be kept aligned for release commits.
+- Latest setup commit: `cebe948fbc44a027d905d26a972ab243f6a5d9c6`.
