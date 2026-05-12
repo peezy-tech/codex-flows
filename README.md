@@ -61,11 +61,16 @@ bun run test
 
 `bun run test` currently runs the `@peezy.tech/codex-flows` transport tests.
 
+## Development Flow
+
+Development happens on Codeberg. GitHub is kept as a release mirror for npm trusted publishing.
+
+See [docs/development-flow.md](docs/development-flow.md) for remotes, key setup, Forgejo CLI setup, and the release procedure.
+
 ## Publishing
 
-The public home for this monorepo is `peezy-tech/codex-flows`. When seeding that
-repo, copy this working tree without `.git`, initialize a fresh git history, and
-push it to the new public GitHub repo.
+The public development home for this monorepo is `codeberg.org/peezy-tech/codex-flows`.
+The GitHub mirror at `peezy-tech/codex-flows` exists for npm trusted publishing.
 
 `@peezy.tech/codex-flows` is published from `packages/codex-client`.
 

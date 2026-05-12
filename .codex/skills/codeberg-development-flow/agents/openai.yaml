@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codeberg Development Flow"
+  short_description: "Codeberg-first development and releases."
+  default_prompt: "Use the Codeberg-first development flow for remotes, commits, Forgejo CLI, mirrors, and npm releases."
