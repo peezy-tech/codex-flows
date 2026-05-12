@@ -1,0 +1,27 @@
+{
+	"name": "codex-discord-bridge",
+	"version": "0.1.0",
+	"description": "Long-lived Discord sidecar for bridging Discord threads to Codex app-server threads.",
+	"type": "module",
+	"private": true,
+	"license": "Apache-2.0",
+	"bin": {
+		"codex-discord-bridge": "./src/index.ts"
+	},
+	"scripts": {
+		"build": "tsc --noEmit",
+		"check:types": "tsc --noEmit",
+		"pretty-log": "bun ./src/pretty-log.ts",
+		"start:debug:commentary": "bun ./src/index.ts --local-app-server --debug --progress-mode commentary",
+		"test": "bun test test/*.test.ts"
+	},
+	"dependencies": {
+		"@peezy-tech/codex-flows": "workspace:*",
+		"discord.js": "catalog:"
+	},
+	"devDependencies": {
+		"@types/bun": "catalog:",
+		"@types/node": "catalog:",
+		"typescript": "catalog:"
+	}
+}

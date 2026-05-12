@@ -1,0 +1,32 @@
+procs:
+  codex-remote-control:
+    shell: >
+      bash -lc 'set -o pipefail;
+      set -a;
+      [ ! -f .env ] || source .env;
+      set +a;
+      codex app-server
+      --listen "${CODEX_WORKSPACE_APP_SERVER_WS_URL:-ws://127.0.0.1:3585}"
+      --enable apps
+      --enable hooks
+      --enable remote_control
+      2>&1 | bun ./apps/discord-bridge/src/pretty-log.ts --name codex-remote-control'
+    autostart: true
+    autorestart: false
+
+  discord-bridge:
+    shell: >
+      bash -lc 'set -o pipefail;
+      set -a;
+      [ ! -f .env ] || source .env;
+      set +a;
+      bun ./apps/discord-bridge/src/index.ts
+      --log-level warn
+      --console-output messages
+      --approval-policy never
+      --sandbox danger-full-access
+      --progress-mode commentary
+      --app-server-url "${CODEX_WORKSPACE_APP_SERVER_WS_URL:-ws://127.0.0.1:3585}"
+      2> >(bun ./apps/discord-bridge/src/pretty-log.ts --name discord-bridge >&2)'
+    autostart: true
+    autorestart: false
