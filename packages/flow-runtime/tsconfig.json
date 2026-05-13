@@ -15,7 +15,11 @@
 		"forceConsistentCasingInFileNames": true,
 		"noEmit": true,
 		"types": ["node", "bun"],
-		"rootDir": "."
+		"baseUrl": ".",
+		"paths": {
+			"@peezy.tech/codex-flows": ["../codex-client/src/index.ts"],
+			"@peezy.tech/codex-flows/*": ["../codex-client/src/*"]
+		}
 	},
 	"include": ["src/**/*.ts", "test/**/*.ts"]
 }
