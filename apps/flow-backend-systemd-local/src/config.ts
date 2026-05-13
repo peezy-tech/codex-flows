@@ -143,6 +143,7 @@ export function helpText(): string {
 		"  CODEX_FLOW_BACKEND_SECRET       Optional HMAC secret for HTTP dispatches",
 		"  CODEX_FLOW_BACKEND_EXECUTOR     direct or systemd-run",
 		"  CODEX_FLOWS_ENABLE_CODE_MODE    Enables runner = \"code-mode\" steps",
+		"  CODEX_FLOW_PUSH/PUBLISH         Optional release-flow action gates",
 		"",
 	].join("\n");
 }
@@ -168,8 +169,16 @@ function executorEnv(value: string | undefined): FlowBackendExecutor {
 function forwardEnv(value: string | undefined): string[] {
 	const defaults = [
 		"CODEX_FLOWS_ENABLE_CODE_MODE",
+		"CODEX_FLOW_COMMIT",
+		"CODEX_FLOW_PUSH",
+		"CODEX_FLOW_PUBLISH",
+		"CODEX_FLOW_FORCE",
+		"CODEX_FLOW_SQUASH_PATCH_STACK",
 		"CODEX_APP_SERVER_CODEX_COMMAND",
 		"CODEX_HOME",
+		"PEEZY_CODEX_REPO",
+		"PEEZY_CODEX_TARGET_BRANCH",
+		"PEEZY_CODEX_CARGO_TARGET_DIR",
 		"HOME",
 		"PATH",
 	];

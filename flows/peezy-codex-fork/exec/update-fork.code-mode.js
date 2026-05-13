@@ -45,6 +45,10 @@ function cfg(name, fallback) {
 }
 
 function enabled(name, fallback) {
+  const override = flowFlagOverrides[name];
+  if (typeof override === "boolean") {
+    return override;
+  }
   const value = config[name];
   return typeof value === "boolean" ? value : fallback;
 }
@@ -65,6 +69,14 @@ async function env(name) {
     max_output_tokens: 2000
   });
   return trim(outputOf(result));
+}
+
+async function envFlag(name) {
+  const value = (await env(name)).trim().toLowerCase();
+  if (!value) {
+    return undefined;
+  }
+  return ["1", "true", "yes", "on"].includes(value);
 }
 
 async function run(label, cmd, options = {}) {
@@ -123,8 +135,14 @@ async function collectRebaseContext(rebaseOutput, beforeSha) {
 
 const releaseTag = String(payload.tag || "");
 const version = versionFromTag(releaseTag);
+const flowFlagOverrides = {
+  force: await envFlag("CODEX_FLOW_FORCE"),
+  push: await envFlag("CODEX_FLOW_PUSH"),
+  publish: await envFlag("CODEX_FLOW_PUBLISH"),
+  squash_patch_stack: await envFlag("CODEX_FLOW_SQUASH_PATCH_STACK")
+};
 const packageName = cfg("package_name", "@peezy.tech/codex");
-const targetBranch = cfg("target_branch", "main");
+const targetBranch = (await env(cfg("target_branch_env", ""))) || cfg("target_branch", "main");
 const upstreamRemote = cfg("upstream_remote", "upstream");
 const upstreamRepoUrl = cfg("upstream_repo_url", "https://github.com/openai/codex.git");
 const cargoTargetDir = (await env(cfg("cargo_target_dir_env", ""))) || cfg("cargo_target_dir", "/tmp/peezy-codex-flow-target");
