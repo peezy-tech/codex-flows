@@ -193,6 +193,20 @@ running Codex or shell work executes. A future Convex backend should:
 This keeps Patchbay dispatch-only, keeps Convex durable, and keeps process-heavy
 work on infrastructure that can run Codex, Bun, Git, Cargo, and system tools.
 
+The reusable component package now lives at
+`packages/flow-backend-convex`. It owns only generic flow control-plane state:
+synced manifests, events, runs, attempts, leases, compact output events, and
+final results. Installing apps should expose their own service-authenticated
+wrapper functions and keep domain-specific completion in app code. For example,
+the 2D pet game keeps asset registration, payment state, and minting outside the
+generic backend.
+
+The first component version stores readable progress chunks in
+`flowOutputEvents`. If durable long-form transcripts become important, add
+`@convex-dev/persistent-text-streaming` as a child component and attach a stream
+id to each run attempt; canonical run state should remain in the flow backend
+tables.
+
 ## Codex Release Flows
 
 The upstream `openai/codex` release event fans out to two flow packages:

@@ -30,8 +30,8 @@ export async function runBunStep(options: RunBunStepOptions): Promise<FlowResult
 	subprocess.stdin.end();
 	const timer = setTimeout(() => subprocess.kill("SIGTERM"), options.step.timeoutMs);
 	const [stdout, stderr, exitCode] = await Promise.all([
-		subprocess.stdout.text(),
-		subprocess.stderr.text(),
+		new Response(subprocess.stdout).text(),
+		new Response(subprocess.stderr).text(),
 		subprocess.exited,
 	]).finally(() => clearTimeout(timer));
 	if (exitCode !== 0) {
