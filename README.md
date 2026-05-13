@@ -104,27 +104,34 @@ See [docs/development-flow.md](docs/development-flow.md) for remotes, key setup,
 The canonical development home for this monorepo is `jojo.build/peezy-tech/codex-flows`.
 Codeberg mirrors `peezy-tech/codex-flows`; the GitHub repository at `peezy-tech/codex-flows` exists for npm trusted publishing.
 
-`@peezy.tech/codex-flows` is published from `packages/codex-client`.
+The public release train publishes:
+
+- `@peezy.tech/codex-flows` from `packages/codex-client`
+- `@peezy.tech/flow-runtime` from `packages/flow-runtime`
+- `@peezy.tech/flow-backend-convex` from `packages/flow-backend-convex`
 
 Before the first publish:
 
 ```bash
-bun run --filter @peezy.tech/codex-flows release:check
+bun run release:check
 ```
 
-Because the npm package does not exist yet, bootstrap the first version with a
-human npm session or short-lived npm token from the public repo checkout. The
-`peezy.tech` npm organization/scope must exist first, and the publishing account
-or token must have write access to that scope:
+Because newly added npm packages do not exist yet, bootstrap their first version
+with a human npm session, short-lived npm token, or npm trusted-publishing setup
+from the public repo checkout. The `peezy.tech` npm organization/scope must
+exist first, and the publishing account or token must have write access to that
+scope:
 
 ```bash
-cd packages/codex-client
-npm publish --access public
+for package in packages/codex-client packages/flow-runtime packages/flow-backend-convex; do
+  (cd "$package" && npm publish --access public)
+done
 ```
 
-After the package exists, configure npm trusted publishing for:
+After the packages exist, configure npm trusted publishing for each public
+package:
 
-- Package: `@peezy.tech/codex-flows`
+- Packages: `@peezy.tech/codex-flows`, `@peezy.tech/flow-runtime`, `@peezy.tech/flow-backend-convex`
 - Repository: `peezy-tech/codex-flows`
 - Workflow: `.github/workflows/publish-codex-flows.yml`
 - Environment: `npm-publish`
@@ -160,6 +167,12 @@ service, with optional transient `systemd-run` units per step.
 Shared runtime package for loading `flow.toml`, validating payload JSON Schema,
 matching steps to generic events, and invoking Bun or feature-flagged Code Mode
 steps.
+
+### `@peezy.tech/flow-backend-convex`
+
+Reusable Convex component package for generic flow event, run, attempt, lease,
+output, replay, cancel, and inspection state. Apps install its Convex component
+and expose their own authenticated wrappers for service workers.
 
 ### `web`
 

@@ -79,12 +79,16 @@ bun run --filter @peezy.tech/codex-flows release:check
 
 ## Releases
 
-Release package: `@peezy.tech/codex-flows`
+Release packages:
+
+- `@peezy.tech/codex-flows`
+- `@peezy.tech/flow-runtime`
+- `@peezy.tech/flow-backend-convex`
 
 Before publishing:
 
 ```bash
-bun run --filter @peezy.tech/codex-flows release:check
+bun run release:check
 bun run check:types
 bun run test
 git diff --check
@@ -92,13 +96,15 @@ git diff --check
 
 To publish through GitHub trusted publishing:
 
-1. Bump `packages/codex-client/package.json`.
+1. Bump `packages/codex-client/package.json`, `packages/flow-runtime/package.json`, and `packages/flow-backend-convex/package.json` together when releasing the stack.
 2. Commit and push to jojo.
 3. Confirm the Codeberg mirror has received the commit.
 4. Push the same commit to GitHub.
-5. Run `.github/workflows/publish-codex-flows.yml` on GitHub with confirmation input `@peezy.tech/codex-flows`.
+5. Run `.github/workflows/publish-codex-flows.yml` on GitHub with confirmation input `publish-codex-flow-packages`.
 6. Verify npm:
 
 ```bash
 npm dist-tag ls @peezy.tech/codex-flows
+npm dist-tag ls @peezy.tech/flow-runtime
+npm dist-tag ls @peezy.tech/flow-backend-convex
 ```

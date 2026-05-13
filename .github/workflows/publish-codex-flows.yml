@@ -1,10 +1,10 @@
-name: Publish @peezy.tech/codex-flows
+name: Publish codex-flow packages
 
 on:
   workflow_dispatch:
     inputs:
       confirm_package:
-        description: "Type @peezy.tech/codex-flows to publish"
+        description: "Type publish-codex-flow-packages to publish"
         required: true
         type: string
 
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   publish:
-    if: inputs.confirm_package == '@peezy.tech/codex-flows'
+    if: inputs.confirm_package == 'publish-codex-flow-packages'
     runs-on: ubuntu-latest
     environment: npm-publish
     steps:
@@ -39,8 +39,34 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Release check
-        run: bun run --filter @peezy.tech/codex-flows release:check
+        run: bun run release:check
 
-      - name: Publish
+      - name: Publish @peezy.tech/codex-flows
         working-directory: packages/codex-client
-        run: npm publish --access public
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "@peezy.tech/codex-flows@$version" version --json >/dev/null 2>&1; then
+            echo "@peezy.tech/codex-flows@$version is already published"
+          else
+            npm publish --access public
+          fi
+
+      - name: Publish @peezy.tech/flow-runtime
+        working-directory: packages/flow-runtime
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "@peezy.tech/flow-runtime@$version" version --json >/dev/null 2>&1; then
+            echo "@peezy.tech/flow-runtime@$version is already published"
+          else
+            npm publish --access public
+          fi
+
+      - name: Publish @peezy.tech/flow-backend-convex
+        working-directory: packages/flow-backend-convex
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "@peezy.tech/flow-backend-convex@$version" version --json >/dev/null 2>&1; then
+            echo "@peezy.tech/flow-backend-convex@$version is already published"
+          else
+            npm publish --access public
+          fi
