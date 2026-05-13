@@ -1,0 +1,121 @@
+import { expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { dispatchFlowEvent } from "../src/backend.ts";
+import { readConfig } from "../src/config.ts";
+import { flowCommand } from "../src/executor.ts";
+import { signBody, verifyBodySignature } from "../src/signature.ts";
+import { FlowBackendStore } from "../src/store.ts";
+
+test("signs and verifies dispatch bodies", () => {
+	const body = JSON.stringify({ id: "event-1" });
+	const signature = signBody("secret", body);
+
+	expect(verifyBodySignature("secret", body, signature)).toBe(true);
+	expect(verifyBodySignature("secret", `${body}\n`, signature)).toBe(false);
+});
+
+test("dispatches matching flow steps and records runs", async () => {
+	const directory = await mkdtemp(path.join(os.tmpdir(), "flow-backend-"));
+	try {
+		await writeFlow(directory);
+		const config = readConfig(
+			{},
+			{
+				cwd: directory,
+				dataDir: path.join(directory, ".codex", "flow-backend"),
+				executor: "direct",
+				bunCommand: process.execPath,
+			},
+		);
+		const store = new FlowBackendStore(path.join(config.dataDir, "flow-backend.sqlite"));
+		try {
+			const result = await dispatchFlowEvent({
+				config,
+				store,
+				wait: true,
+				env: {},
+				event: {
+					id: "event-1",
+					type: "demo.event",
+					receivedAt: "2026-05-13T00:00:00.000Z",
+					payload: { name: "Ada" },
+				},
+			});
+
+			expect(result).toMatchObject({ status: "accepted", eventId: "event-1", matched: 1 });
+			const runs = store.listRunsByEvent("event-1");
+			expect(runs).toHaveLength(1);
+			expect(runs[0]).toMatchObject({
+				flowName: "demo",
+				stepName: "hello",
+				status: "completed",
+			});
+			expect(runs[0]?.stdout).toContain("hello Ada");
+		} finally {
+			store.close();
+		}
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("builds systemd-run commands without executing them", () => {
+	const config = readConfig({}, { cwd: "/tmp/project", executor: "systemd-run", bunCommand: "/usr/bin/bun" });
+	const command = flowCommand({
+		config,
+		runId: "run_123",
+		eventPath: "/tmp/event.json",
+		flowName: "demo",
+		stepName: "hello",
+		env: { CODEX_FLOWS_ENABLE_CODE_MODE: "1" },
+	});
+
+	expect(command.command).toBe("systemd-run");
+	expect(command.args).toContain("--user");
+	expect(command.args).toContain("--wait");
+	expect(command.args).toContain("--setenv=CODEX_FLOWS_ENABLE_CODE_MODE=1");
+	expect(command.args).toContain("/usr/bin/bun");
+});
+
+async function writeFlow(root: string): Promise<void> {
+	const flowRoot = path.join(root, "flows", "demo");
+	await mkdir(path.join(flowRoot, "exec"), { recursive: true });
+	await mkdir(path.join(flowRoot, "schemas"), { recursive: true });
+	await Bun.write(
+		path.join(flowRoot, "flow.toml"),
+		[
+			'name = "demo"',
+			"version = 1",
+			"",
+			"[[steps]]",
+			'name = "hello"',
+			'runner = "bun"',
+			'script = "exec/hello.ts"',
+			"timeout_ms = 30000",
+			"",
+			"[steps.trigger]",
+			'type = "demo.event"',
+			'schema = "schemas/demo-event.schema.json"',
+			"",
+		].join("\n"),
+	);
+	await Bun.write(
+		path.join(flowRoot, "schemas/demo-event.schema.json"),
+		JSON.stringify({
+			type: "object",
+			required: ["name"],
+			properties: { name: { type: "string" } },
+		}),
+	);
+	await Bun.write(
+		path.join(flowRoot, "exec/hello.ts"),
+		[
+			"const context = JSON.parse(await Bun.stdin.text());",
+			"const name = context.flow.event.payload.name;",
+			"console.log(`FLOW_RESULT ${JSON.stringify({ status: 'completed', message: `hello ${name}` })}`);",
+			"",
+		].join("\n"),
+	);
+}

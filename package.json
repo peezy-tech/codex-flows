@@ -40,8 +40,10 @@
 		"check:types": "bun run --workspaces check:types",
 		"dev": "bun run --filter web dev",
 		"dev:web": "bun run --filter web dev",
+		"flow": "bun apps/flow-runner/src/index.ts",
+		"flow:backend": "bun apps/flow-backend-systemd-local/src/index.ts",
 		"start": "bun run --filter web preview",
 		"start:discord:debug:commentary": "bun run --filter codex-discord-bridge start:debug:commentary",
-		"test": "bun run --filter @peezy.tech/codex-flows test && bun run --filter codex-app-cli test && bun run --filter codex-discord-bridge test"
+		"test": "bun run --filter @peezy.tech/codex-flows test && bun run --filter @peezy.tech/flow-runtime test && bun run --filter codex-flow-systemd-local test && bun run --filter codex-app-cli test && bun run --filter codex-discord-bridge test"
 	}
 }

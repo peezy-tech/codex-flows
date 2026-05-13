@@ -2,12 +2,14 @@
 
 Thin browser UI plus TypeScript client for `codex app-server`.
 
-This branch intentionally drops the workspace service, runtime, gateways, jobs,
-delegation, and host setup layer. The remaining source is:
+The current source is:
 
 - `apps/web`: React/Vite UI that connects directly to a Codex app-server WebSocket.
 - `apps/cli`: Bun CLI that sends JSON-RPC actions to a listening Codex app-server.
+- `apps/flow-runner`: CLI for discovering and firing packaged flows.
+- `apps/flow-backend-systemd-local`: local HTTP backend for executing flows from dispatch events.
 - `packages/codex-client`: JSON-RPC client, app-server transports, flow helpers, and generated protocol types.
+- `packages/flow-runtime`: flow manifest loading, event matching, and runner primitives.
 - `packages/ui`: small shared UI primitives and styling.
 
 ## Run
@@ -59,7 +61,23 @@ bun run build
 bun run test
 ```
 
-`bun run test` currently runs the `@peezy.tech/codex-flows` transport tests.
+`bun run test` runs the client, flow runtime, local flow backend, CLI, and
+Discord bridge tests.
+
+## Flow Automation
+
+Flow packages live under `flows/*` and installed copies can live under
+`.codex/flows/*`. See [docs/flows.md](docs/flows.md) for `flow.toml`, generic
+`FlowEvent` dispatch, Bun and Code Mode runners, the systemd-local backend, and
+the Codex release flows.
+
+```bash
+bun run flow list
+bun run flow:backend serve --cwd "$(pwd)"
+```
+
+Code Mode flow steps are present on `main` but require
+`CODEX_FLOWS_ENABLE_CODE_MODE=1` before execution.
 
 ## Development Flow
 
@@ -111,6 +129,23 @@ The low-level app-server client package. It exports:
 - `@peezy.tech/codex-flows/flows`: framework-agnostic helpers for app servers that want to start Codex-backed workflows.
 - `@peezy.tech/codex-flows/rpc`: JSON-RPC helpers and types.
 - `@peezy.tech/codex-flows/generated`: generated Codex app-server protocol types.
+
+### `flow-runner`
+
+CLI package for listing flow packages, firing every step that matches a
+`FlowEvent`, or running one explicit flow step.
+
+### `flow-backend-systemd-local`
+
+HTTP and CLI backend that persists dispatched flow events/runs to SQLite and
+starts matching steps locally. It is intended to run as a small systemd-managed
+service, with optional transient `systemd-run` units per step.
+
+### `@peezy.tech/flow-runtime`
+
+Shared runtime package for loading `flow.toml`, validating payload JSON Schema,
+matching steps to generic events, and invoking Bun or feature-flagged Code Mode
+steps.
 
 ### `web`
 

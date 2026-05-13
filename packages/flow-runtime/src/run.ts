@@ -1,0 +1,33 @@
+import { runBunStep } from "./runners/bun.ts";
+import { runCodeModeStep, type RunCodeModeStepOptions } from "./runners/code-mode.ts";
+import type { FlowEvent, FlowResult, FlowStep, LoadedFlow } from "./types.ts";
+
+export type RunFlowStepOptions = {
+	flow: LoadedFlow;
+	step: FlowStep;
+	event: FlowEvent;
+	env?: Record<string, string | undefined>;
+	codeMode?: Pick<RunCodeModeStepOptions, "codexCommand" | "codexHome" | "stream">;
+};
+
+export async function runFlowStep(options: RunFlowStepOptions): Promise<FlowResult> {
+	if (options.step.runner === "bun") {
+		return runBunStep(options);
+	}
+	if (!codeModeEnabled(options.env ?? process.env)) {
+		throw new Error(
+			`Code Mode flow step ${options.flow.manifest.name}/${options.step.name} requires CODEX_FLOWS_ENABLE_CODE_MODE=1`,
+		);
+	}
+	return runCodeModeStep({
+		flow: options.flow,
+		step: options.step,
+		event: options.event,
+		...options.codeMode,
+	});
+}
+
+export function codeModeEnabled(env: Record<string, string | undefined>): boolean {
+	const value = env.CODEX_FLOWS_ENABLE_CODE_MODE?.trim().toLowerCase();
+	return value === "1" || value === "true" || value === "yes" || value === "on";
+}
