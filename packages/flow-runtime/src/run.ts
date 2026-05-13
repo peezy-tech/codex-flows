@@ -1,3 +1,4 @@
+import { codexFlowsCodeModeEnabled } from "@peezy.tech/codex-flows";
 import { runBunStep } from "./runners/bun.ts";
 import { runCodeModeStep, type RunCodeModeStepOptions } from "./runners/code-mode.ts";
 import type { FlowEvent, FlowResult, FlowStep, LoadedFlow } from "./types.ts";
@@ -28,6 +29,5 @@ export async function runFlowStep(options: RunFlowStepOptions): Promise<FlowResu
 }
 
 export function codeModeEnabled(env: Record<string, string | undefined>): boolean {
-	const value = env.CODEX_FLOWS_ENABLE_CODE_MODE?.trim().toLowerCase();
-	return value === "1" || value === "true" || value === "yes" || value === "on";
+	return codexFlowsCodeModeEnabled(env);
 }

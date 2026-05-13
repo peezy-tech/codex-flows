@@ -10,6 +10,11 @@ import {
 	requireJsonRpcResult,
 	stringifyJsonRpc,
 } from "./rpc.ts";
+import {
+	CODEX_FLOWS_CODE_MODE,
+	DEFAULT_CODE_MODE_CODEX_PACKAGE,
+	codexFlowsMode,
+} from "../mode.ts";
 
 type PendingRequest = {
 	resolve: (value: JsonRpcResponse) => void;
@@ -28,6 +33,14 @@ export type CodexStdioTransportOptions = {
 	requestTimeoutMs?: number;
 };
 
+export type ResolvedCodexStdioCommand = {
+	command: string;
+	args: string[];
+};
+
+export const DEFAULT_CODEX_COMMAND = "codex";
+export const DEFAULT_CODEX_NPM_PACKAGE = DEFAULT_CODE_MODE_CODEX_PACKAGE;
+
 export class CodexStdioTransport extends CodexEventEmitter {
 	readonly requestTimeoutMs: number;
 	#codexCommand: string;
@@ -40,10 +53,9 @@ export class CodexStdioTransport extends CodexEventEmitter {
 
 	constructor(options: CodexStdioTransportOptions = {}) {
 		super();
-		this.#codexCommand = options.codexCommand ?? "codex";
-		const appServerSocket =
-			options.appServerSocket ?? process.env.CODEX_WORKSPACE_APP_SERVER_SOCK;
-		this.#args = options.args ?? defaultCodexArgs(appServerSocket);
+		const command = resolveCodexStdioCommand(options, { ...process.env, ...options.env });
+		this.#codexCommand = command.command;
+		this.#args = command.args;
 		this.#cwd = options.cwd;
 		this.#env = options.env;
 		this.requestTimeoutMs = options.requestTimeoutMs ?? 60_000;
@@ -198,6 +210,28 @@ export class CodexStdioTransport extends CodexEventEmitter {
 		}
 		this.#pending.clear();
 	}
+}
+
+export function resolveCodexStdioCommand(
+	options: Pick<CodexStdioTransportOptions, "appServerSocket" | "args" | "codexCommand"> = {},
+	env: Record<string, string | undefined> = process.env,
+): ResolvedCodexStdioCommand {
+	const explicitCommand = options.codexCommand ?? env.CODEX_APP_SERVER_CODEX_COMMAND;
+	const appServerSocket = options.appServerSocket ?? env.CODEX_WORKSPACE_APP_SERVER_SOCK;
+	const args = options.args ?? defaultCodexArgs(appServerSocket);
+	if (explicitCommand?.trim()) {
+		return { command: explicitCommand, args };
+	}
+
+	const packageName = env.CODEX_APP_SERVER_CODEX_PACKAGE?.trim();
+	if (packageName || codexFlowsMode(env) === CODEX_FLOWS_CODE_MODE) {
+		return {
+			command: env.CODEX_APP_SERVER_BUNX_COMMAND?.trim() || "bunx",
+			args: [packageName || DEFAULT_CODE_MODE_CODEX_PACKAGE, ...args],
+		};
+	}
+
+	return { command: DEFAULT_CODEX_COMMAND, args };
 }
 
 function killChildProcessGroup(

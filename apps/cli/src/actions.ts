@@ -18,6 +18,7 @@ export const APP_SERVER_ACTIONS = [
 	"thread/unarchive",
 	"thread/compact/start",
 	"thread/shellCommand",
+	"thread/codeMode/execute",
 	"thread/approveGuardianDeniedAction",
 	"thread/backgroundTerminals/clean",
 	"thread/rollback",

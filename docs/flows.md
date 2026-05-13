@@ -71,14 +71,19 @@ JSON.
 
 `runner = "code-mode"` starts a Codex app-server and calls the fork-only
 `thread/codeMode/execute` method through a raw JSON-RPC request. Code Mode code
-is present on `main`, but execution is disabled unless:
+is present on `main`, but execution is disabled unless codex-flows is set to
+Code Mode:
 
 ```bash
-CODEX_FLOWS_ENABLE_CODE_MODE=1
+CODEX_FLOWS_MODE=code-mode
 ```
 
-Set `CODEX_APP_SERVER_CODEX_COMMAND` when Code Mode should run against the
-Peezy fork instead of the default `codex` binary.
+That single mode setting also makes stdio app-server launches default to
+`bunx @peezy.tech/codex`. Set `CODEX_APP_SERVER_CODEX_COMMAND` when Code Mode
+should run against a specific local binary instead, or
+`CODEX_APP_SERVER_CODEX_PACKAGE` when it should use a different npm package.
+The older `CODEX_FLOWS_ENABLE_CODE_MODE=1` gate is still accepted as a narrow
+runner-only escape hatch.
 
 ## Commands
 
@@ -156,7 +161,7 @@ The upstream `openai/codex` release event fans out to two flow packages:
   commits when changed, and can push/trigger trusted publishing when configured.
 - `peezy-codex-fork`: Code Mode runner. Rebases the Peezy fork patch stack onto
   the upstream release tag, optionally squashes the patch stack, verifies the
-  fork, and can push/tag to trigger the fork release workflow when configured.
+  fork, and can push/tag to trigger the fork release flow when configured.
 
 Publishing is controlled by flow config and environment. The packaged defaults
 commit local changes when appropriate but do not push or publish until

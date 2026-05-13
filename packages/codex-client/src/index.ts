@@ -5,6 +5,10 @@ export {
 } from "./app-server/client.ts";
 export {
 	CodexStdioTransport,
+	DEFAULT_CODEX_COMMAND,
+	DEFAULT_CODEX_NPM_PACKAGE,
+	resolveCodexStdioCommand,
+	type ResolvedCodexStdioCommand,
 	type CodexStdioTransportOptions,
 } from "./app-server/stdio-transport.ts";
 export {
@@ -49,3 +53,9 @@ export type {
 	CodexUsageWindow,
 	WaitForLoginOptions,
 } from "./app-server/auth.ts";
+export {
+	CODEX_FLOWS_CODE_MODE,
+	DEFAULT_CODE_MODE_CODEX_PACKAGE,
+	codexFlowsCodeModeEnabled,
+	codexFlowsMode,
+} from "./mode.ts";

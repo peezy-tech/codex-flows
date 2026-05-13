@@ -70,6 +70,7 @@ test("builds systemd-run commands without executing them", () => {
 		flowName: "demo",
 		stepName: "hello",
 		env: {
+			CODEX_FLOWS_MODE: "code-mode",
 			CODEX_FLOWS_ENABLE_CODE_MODE: "1",
 			CODEX_FLOW_PUSH: "1",
 			PEEZY_CODEX_REPO: "/tmp/codex",
@@ -79,6 +80,7 @@ test("builds systemd-run commands without executing them", () => {
 	expect(command.command).toBe("systemd-run");
 	expect(command.args).toContain("--user");
 	expect(command.args).toContain("--wait");
+	expect(command.args).toContain("--setenv=CODEX_FLOWS_MODE=code-mode");
 	expect(command.args).toContain("--setenv=CODEX_FLOWS_ENABLE_CODE_MODE=1");
 	expect(command.args).toContain("--setenv=CODEX_FLOW_PUSH=1");
 	expect(command.args).toContain("--setenv=PEEZY_CODEX_REPO=/tmp/codex");

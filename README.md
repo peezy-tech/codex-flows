@@ -76,8 +76,15 @@ bun run flow list
 bun run flow:backend serve --cwd "$(pwd)"
 ```
 
-Code Mode flow steps are present on `main` but require
-`CODEX_FLOWS_ENABLE_CODE_MODE=1` before execution.
+Code Mode flow steps are present on `main` behind one mode flag:
+
+```bash
+CODEX_FLOWS_MODE=code-mode
+```
+
+That mode enables `runner = "code-mode"` steps and makes stdio app-server
+launches default to `bunx @peezy.tech/codex`. `CODEX_APP_SERVER_CODEX_COMMAND`
+still wins when a specific local binary should be used.
 
 ## Development Flow
 

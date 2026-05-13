@@ -2,7 +2,11 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { CodexStdioTransport } from "../src/app-server/stdio-transport.ts";
+import {
+	DEFAULT_CODEX_NPM_PACKAGE,
+	CodexStdioTransport,
+	resolveCodexStdioCommand,
+} from "../src/app-server/stdio-transport.ts";
 
 test("round-trips JSON-RPC over Bun stdio transport", async () => {
 	const directory = await mkdtemp(path.join(os.tmpdir(), "codex-stdio-"));
@@ -26,6 +30,54 @@ test("round-trips JSON-RPC over Bun stdio transport", async () => {
 		transport.close();
 		await rm(directory, { recursive: true, force: true });
 	}
+});
+
+test("resolves default stdio command from codex-flows mode", () => {
+	expect(resolveCodexStdioCommand({}, {})).toEqual({
+		command: "codex",
+		args: ["app-server", "--listen", "stdio://", "--enable", "apps", "--enable", "hooks"],
+	});
+	expect(resolveCodexStdioCommand({}, { CODEX_FLOWS_MODE: "code-mode" })).toEqual({
+		command: "bunx",
+		args: [
+			DEFAULT_CODEX_NPM_PACKAGE,
+			"app-server",
+			"--listen",
+			"stdio://",
+			"--enable",
+			"apps",
+			"--enable",
+			"hooks",
+		],
+	});
+	expect(resolveCodexStdioCommand({}, { CODEX_FLOWS_ENABLE_CODE_MODE: "1" })).toEqual({
+		command: "codex",
+		args: ["app-server", "--listen", "stdio://", "--enable", "apps", "--enable", "hooks"],
+	});
+	expect(
+		resolveCodexStdioCommand(
+			{ args: ["app-server", "--listen", "stdio://", "--enable", "code_mode"] },
+			{
+				CODEX_FLOWS_MODE: "code-mode",
+				CODEX_APP_SERVER_CODEX_PACKAGE: "@example/codex",
+			},
+		),
+	).toEqual({
+		command: "bunx",
+		args: ["@example/codex", "app-server", "--listen", "stdio://", "--enable", "code_mode"],
+	});
+});
+
+test("explicit stdio command wins over codex-flows mode", () => {
+	expect(
+		resolveCodexStdioCommand(
+			{ codexCommand: "/tmp/codex", args: ["app-server"] },
+			{ CODEX_FLOWS_MODE: "code-mode" },
+		),
+	).toEqual({
+		command: "/tmp/codex",
+		args: ["app-server"],
+	});
 });
 
 function fakeAppServerSource(): string {

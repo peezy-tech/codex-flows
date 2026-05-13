@@ -9,6 +9,7 @@ import {
 	runFlowStep,
 	validateJsonSchema,
 } from "../src/index.ts";
+import { codeModeEnabled } from "../src/run.ts";
 import type { FlowEvent } from "../src/index.ts";
 
 test("discovers installed flows before source flows", async () => {
@@ -87,6 +88,12 @@ test("bundled Code Mode flow remains gated by the feature flag", async () => {
 			env: {},
 		}),
 	).rejects.toThrow("requires CODEX_FLOWS_ENABLE_CODE_MODE=1");
+});
+
+test("CODEX_FLOWS_MODE=code-mode enables Code Mode flow steps", () => {
+	expect(codeModeEnabled({})).toBe(false);
+	expect(codeModeEnabled({ CODEX_FLOWS_ENABLE_CODE_MODE: "1" })).toBe(true);
+	expect(codeModeEnabled({ CODEX_FLOWS_MODE: "code-mode" })).toBe(true);
 });
 
 test("validates simple JSON schema constraints", () => {

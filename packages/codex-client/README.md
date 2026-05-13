@@ -32,7 +32,12 @@ This package owns the low-level JSON-RPC client, transports, framework-agnostic 
 
 ## Transports
 
-`CodexAppServerClient` defaults to a stdio transport that starts `codex app-server` when no explicit transport is provided.
+`CodexAppServerClient` defaults to a stdio transport that starts
+`codex app-server` when no explicit transport is provided. When
+`CODEX_FLOWS_MODE=code-mode`, the same stdio default becomes
+`bunx @peezy.tech/codex app-server`, so Code Mode callers automatically use the
+Peezy fork. Set `CODEX_APP_SERVER_CODEX_COMMAND` or pass
+`transportOptions.codexCommand` to use a locally built binary instead.
 
 It can also connect to an existing WebSocket app-server when `CODEX_WORKSPACE_APP_SERVER_WS_URL` is set, or when `webSocketTransportOptions.url` is passed.
 
