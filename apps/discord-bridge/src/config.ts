@@ -126,6 +126,10 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv): ParsedConfi
 			),
 			statePath,
 			gateway: gatewayConfig(args, env),
+			flowBackendUrl:
+				stringFlag(args, "flow-backend-url") ??
+				env.CODEX_FLOW_BACKEND_URL ??
+				env.CODEX_GATEWAY_BACKEND_URL,
 			cwd: resolveHomeDir(
 				stringFlag(args, "dir") ??
 					stringFlag(args, "positional-dir") ??
@@ -361,6 +365,7 @@ Options:
   --allowed-channel-ids <ids>     Comma-separated parent channel ids
   --home-channel-id <id>          Enable gateway mode for one Discord home channel
   --main-thread-id <id>           Resume an existing Codex operator thread for gateway mode
+  --flow-backend-url <url>        Optional codex-flow-systemd-local backend URL
   [dir]                           Optional Codex thread directory, resolved from home
   --dir <path>                    Codex thread directory, resolved from home
   --cwd <path>                    Alias for --dir

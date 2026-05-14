@@ -1,7 +1,9 @@
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 import type { JsonRpcNotification, JsonRpcRequest } from "@peezy.tech/codex-flows/rpc";
+import type { JsonValue } from "@peezy.tech/codex-flows/generated/serde_json/JsonValue";
 import type { v2 } from "@peezy.tech/codex-flows/generated";
 
 import type { DiscordConsoleOutput } from "./console-output.ts";
@@ -13,6 +15,7 @@ import {
 import type {
 	CodexBridgeClient,
 	DiscordBridgeConfig,
+	DiscordGatewayDelegation,
 	DiscordBridgeSession,
 	DiscordBridgeState,
 	DiscordBridgeStateStore,
@@ -569,7 +572,8 @@ export class DiscordCodexBridge {
 			`Delegations: ${delegations.length} tracked, ${activeDelegations.length} active`,
 			"",
 			"**Delegation Backend**",
-			"Status: prepared for privileged backend/MCP tools; no delegation tool is attached yet.",
+			`Status: ${session ? "privileged gateway tools available to the main Codex operator thread" : "waiting for main Codex operator thread"}.`,
+			`Flow backend: \`${this.config.flowBackendUrl ?? "not configured"}\``,
 			"",
 			"**Detail Threads**",
 			"Status: optional detail-thread records are supported in state; automatic detail thread mirroring is not enabled yet.",
@@ -597,11 +601,77 @@ export class DiscordCodexBridge {
 	}
 
 	#handleServerRequest(message: JsonRpcRequest): void {
-		this.client.respondError(
-			message.id,
-			-32603,
-			"codex-discord-bridge does not handle app-server requests yet",
-		);
+		if (message.method === "item/tool/call") {
+			void this.#handleDynamicToolCall(message).catch((error) => {
+				this.client.respondError(
+					message.id,
+					-32603,
+					errorMessage(error),
+				);
+			});
+			return;
+		}
+		this.client.respondError(message.id, -32603, "Unsupported app-server request");
+	}
+
+	async #handleDynamicToolCall(message: JsonRpcRequest): Promise<void> {
+		const params = record(message.params);
+		const threadId = stringValue(params.threadId);
+		const namespace = stringValue(params.namespace);
+		const tool = stringValue(params.tool);
+		if (
+			!threadId ||
+			threadId !== this.#gatewaySession()?.codexThreadId ||
+			namespace !== "codex_gateway" ||
+			!tool
+		) {
+			this.client.respondError(
+				message.id,
+				-32601,
+				"Unknown dynamic tool request",
+			);
+			return;
+		}
+		const result = await this.#callGatewayTool(tool, record(params.arguments));
+		this.client.respond(message.id, {
+			contentItems: [
+				{
+					type: "inputText",
+					text: JSON.stringify(result, null, 2),
+				},
+			],
+			success: true,
+		});
+	}
+
+	async #callGatewayTool(
+		tool: string,
+		args: Record<string, unknown>,
+	): Promise<unknown> {
+		if (tool === "list_delegations") {
+			return {
+				delegations: this.#gatewayDelegations(),
+			};
+		}
+		if (tool === "start_delegation") {
+			return await this.#startDelegation(args);
+		}
+		if (tool === "resume_delegation") {
+			return await this.#resumeDelegation(args);
+		}
+		if (tool === "send_delegation") {
+			return await this.#sendDelegation(args);
+		}
+		if (tool === "read_delegation") {
+			return await this.#readDelegation(args);
+		}
+		if (tool === "list_flow_runs") {
+			return await this.#flowBackendGet("/runs", args);
+		}
+		if (tool === "list_flow_events") {
+			return await this.#flowBackendGet("/events", args);
+		}
+		throw new Error(`Unknown gateway tool: ${tool}`);
 	}
 
 	#registerRunner(session: DiscordBridgeSession): DiscordThreadRunner {
@@ -653,7 +723,10 @@ export class DiscordCodexBridge {
 					configuredThreadId,
 					this.config.cwd,
 				))
-			: await this.client.startThread(this.#threadStartParams(this.config.cwd));
+			: await this.client.startThread({
+					...this.#threadStartParams(this.config.cwd),
+					dynamicTools: gatewayToolSpecs(),
+				});
 		const codexThreadId = started.thread.id;
 		if (!configuredThreadId) {
 			await this.client.setThreadName({
@@ -702,6 +775,185 @@ export class DiscordCodexBridge {
 		return session
 			? this.#runnersByDiscordThread.get(session.discordThreadId)
 			: undefined;
+	}
+
+	#gatewayDelegations(): DiscordGatewayDelegation[] {
+		const state = this.#requireState();
+		if (!state.gateway) {
+			state.gateway = {
+				homeChannelId: this.config.gateway?.homeChannelId ?? "",
+				mainThreadId: this.#gatewaySession()?.codexThreadId,
+				delegations: [],
+			};
+		}
+		state.gateway.delegations ??= [];
+		return state.gateway.delegations;
+	}
+
+	async #startDelegation(args: Record<string, unknown>): Promise<unknown> {
+		const cwd = requiredArg(args, "cwd");
+		const title = stringValue(args.title) ?? firstLine(stringValue(args.prompt)) ??
+			`Delegated ${compactId(cwd)}`;
+		const prompt = stringValue(args.prompt);
+		const started = await this.client.startThread(this.#threadStartParams(cwd));
+		const codexThreadId = started.thread.id;
+		await this.client.setThreadName({
+			threadId: codexThreadId,
+			name: `[delegated] ${title}`,
+		});
+		const now = this.#now().toISOString();
+		const delegation = this.#upsertDelegation({
+			id: delegationId(codexThreadId),
+			codexThreadId,
+			title,
+			status: prompt ? "active" : "idle",
+			cwd,
+			discordDetailThreadId: stringValue(args.discordDetailThreadId),
+			parentDiscordMessageId: stringValue(args.parentDiscordMessageId),
+			createdAt: now,
+			updatedAt: now,
+		});
+		let turnId: string | undefined;
+		if (prompt) {
+			const turn = await this.client.startTurn({
+				threadId: codexThreadId,
+				input: [{ type: "text", text: prompt, text_elements: [] }],
+				cwd,
+				model: this.config.model ?? null,
+				serviceTier: this.config.serviceTier ?? null,
+				effort: this.config.effort ?? null,
+				summary: this.config.summary ?? null,
+				approvalPolicy: this.config.approvalPolicy ?? null,
+				permissions: this.config.permissions ?? null,
+				outputSchema: null,
+			});
+			turnId = turn.turn.id;
+		}
+		await this.#persist();
+		return { delegation, turnId };
+	}
+
+	async #resumeDelegation(args: Record<string, unknown>): Promise<unknown> {
+		const codexThreadId = requiredArg(args, "threadId");
+		const cwd = stringValue(args.cwd);
+		const resumed = await this.client.resumeThread(this.#threadResumeParams(codexThreadId, cwd));
+		const now = this.#now().toISOString();
+		const delegation = this.#upsertDelegation({
+			id: stringValue(args.id) ?? delegationId(codexThreadId),
+			codexThreadId,
+			title: stringValue(args.title) ?? `Delegated ${compactId(codexThreadId)}`,
+			status: "idle",
+			cwd: cwd ?? resumeResponseCwd(resumed),
+			discordDetailThreadId: stringValue(args.discordDetailThreadId),
+			parentDiscordMessageId: stringValue(args.parentDiscordMessageId),
+			createdAt: this.#delegationForThread(codexThreadId)?.createdAt ?? now,
+			updatedAt: now,
+		});
+		await this.#persist();
+		return { delegation };
+	}
+
+	async #sendDelegation(args: Record<string, unknown>): Promise<unknown> {
+		const delegation = this.#requireDelegation(args);
+		const prompt = requiredArg(args, "prompt");
+		const turn = await this.client.startTurn({
+			threadId: delegation.codexThreadId,
+			input: [{ type: "text", text: prompt, text_elements: [] }],
+			cwd: delegation.cwd ?? null,
+			model: this.config.model ?? null,
+			serviceTier: this.config.serviceTier ?? null,
+			effort: this.config.effort ?? null,
+			summary: this.config.summary ?? null,
+			approvalPolicy: this.config.approvalPolicy ?? null,
+			permissions: this.config.permissions ?? null,
+			outputSchema: null,
+		});
+		delegation.status = "active";
+		delegation.updatedAt = this.#now().toISOString();
+		await this.#persist();
+		return { delegation, turnId: turn.turn.id };
+	}
+
+	async #readDelegation(args: Record<string, unknown>): Promise<unknown> {
+		const delegation = this.#requireDelegation(args);
+		const response = await this.client.readThread({
+			threadId: delegation.codexThreadId,
+			includeTurns: true,
+		});
+		const snapshot = threadSnapshotFromThread(response.thread);
+		const turns = Array.isArray(response.thread.turns) ? response.thread.turns : [];
+		const latest = record(turns[turns.length - 1]);
+		const latestStatus = stringValue(latest.status);
+		if (latestStatus === "completed") {
+			delegation.status = "idle";
+		} else if (latestStatus === "failed" || latestStatus === "interrupted") {
+			delegation.status = "failed";
+		} else if (latestStatus) {
+			delegation.status = "active";
+		}
+		delegation.updatedAt = this.#now().toISOString();
+		await this.#persist();
+		return {
+			delegation,
+			latestTurnId: stringValue(latest.id),
+			latestStatus,
+			lastFinal: snapshot.lastFinal,
+			terminalTurnIds: snapshot.terminalTurnIds,
+		};
+	}
+
+	async #flowBackendGet(
+		pathname: string,
+		args: Record<string, unknown>,
+	): Promise<unknown> {
+		const baseUrl = this.config.flowBackendUrl;
+		if (!baseUrl) {
+			throw new Error("No flow backend URL configured.");
+		}
+		const url = new URL(pathname, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
+		for (const [key, value] of Object.entries(args)) {
+			if (value !== undefined && value !== null) {
+				url.searchParams.set(key, String(value));
+			}
+		}
+		const response = await fetch(url);
+		if (!response.ok) {
+			throw new Error(`Flow backend ${url.pathname} failed with ${response.status}`);
+		}
+		return await response.json();
+	}
+
+	#upsertDelegation(input: DiscordGatewayDelegation): DiscordGatewayDelegation {
+		const delegations = this.#gatewayDelegations();
+		const index = delegations.findIndex((delegation) =>
+			delegation.id === input.id ||
+			delegation.codexThreadId === input.codexThreadId
+		);
+		if (index >= 0) {
+			delegations[index] = { ...delegations[index], ...input };
+			return delegations[index] as DiscordGatewayDelegation;
+		}
+		delegations.push(input);
+		return input;
+	}
+
+	#requireDelegation(args: Record<string, unknown>): DiscordGatewayDelegation {
+		const id = stringValue(args.delegationId) ?? stringValue(args.id);
+		const threadId = stringValue(args.threadId);
+		const delegation = this.#gatewayDelegations().find((candidate) =>
+			(id && candidate.id === id) ||
+			(threadId && candidate.codexThreadId === threadId)
+		);
+		if (!delegation) {
+			throw new Error("Unknown gateway delegation.");
+		}
+		return delegation;
+	}
+
+	#delegationForThread(threadId: string): DiscordGatewayDelegation | undefined {
+		return this.#gatewayDelegations().find((delegation) =>
+			delegation.codexThreadId === threadId
+		);
 	}
 
 	#isSessionRunning(
@@ -1128,6 +1380,107 @@ function isDuplicate(state: DiscordBridgeState, messageId: string): boolean {
 	);
 }
 
+function gatewayToolSpecs(): v2.DynamicToolSpec[] {
+	return [
+		{
+			namespace: "codex_gateway",
+			name: "list_delegations",
+			description: "List delegated Codex sessions tracked by the Discord gateway.",
+			inputSchema: objectSchema({}),
+		},
+		{
+			namespace: "codex_gateway",
+			name: "start_delegation",
+			description: "Start a delegated Codex session in a cwd and optionally start its first turn.",
+			inputSchema: objectSchema({
+				cwd: stringSchema("Workspace cwd for the delegated Codex session."),
+				title: optionalStringSchema("Human title for the delegated work."),
+				prompt: optionalStringSchema("Optional first prompt to send to the delegated session."),
+				discordDetailThreadId: optionalStringSchema("Optional Discord detail thread id for noisy work."),
+				parentDiscordMessageId: optionalStringSchema("Optional Discord message id that requested the delegation."),
+			}, ["cwd"]),
+		},
+		{
+			namespace: "codex_gateway",
+			name: "resume_delegation",
+			description: "Register an existing Codex thread as delegated work.",
+			inputSchema: objectSchema({
+				threadId: stringSchema("Existing Codex thread id to resume and track."),
+				cwd: optionalStringSchema("Optional cwd override for the resumed thread."),
+				title: optionalStringSchema("Human title for the delegated work."),
+				discordDetailThreadId: optionalStringSchema("Optional Discord detail thread id for noisy work."),
+				parentDiscordMessageId: optionalStringSchema("Optional Discord message id that requested the delegation."),
+			}, ["threadId"]),
+		},
+		{
+			namespace: "codex_gateway",
+			name: "send_delegation",
+			description: "Send a prompt as a new turn to a tracked delegated Codex session.",
+			inputSchema: objectSchema({
+				delegationId: optionalStringSchema("Tracked delegation id."),
+				threadId: optionalStringSchema("Tracked delegated Codex thread id."),
+				prompt: stringSchema("Prompt to send to the delegated session."),
+			}, ["prompt"]),
+		},
+		{
+			namespace: "codex_gateway",
+			name: "read_delegation",
+			description: "Read and summarize a tracked delegated Codex session.",
+			inputSchema: objectSchema({
+				delegationId: optionalStringSchema("Tracked delegation id."),
+				threadId: optionalStringSchema("Tracked delegated Codex thread id."),
+			}),
+		},
+		{
+			namespace: "codex_gateway",
+			name: "list_flow_runs",
+			description: "List runs from the configured codex-flow-systemd-local backend.",
+			inputSchema: objectSchema({
+				eventId: optionalStringSchema("Optional event id filter."),
+				status: optionalStringSchema("Optional run status filter."),
+				limit: optionalStringSchema("Optional max result count."),
+			}),
+		},
+		{
+			namespace: "codex_gateway",
+			name: "list_flow_events",
+			description: "List events from the configured codex-flow-systemd-local backend.",
+			inputSchema: objectSchema({
+				type: optionalStringSchema("Optional event type filter."),
+				limit: optionalStringSchema("Optional max result count."),
+			}),
+		},
+	];
+}
+
+function objectSchema(
+	properties: Record<string, JsonValue>,
+	required: string[] = [],
+): JsonValue {
+	return {
+		type: "object",
+		properties,
+		required,
+		additionalProperties: false,
+	};
+}
+
+function stringSchema(description: string): JsonValue {
+	return { type: "string", description };
+}
+
+function optionalStringSchema(description: string): JsonValue {
+	return stringSchema(description);
+}
+
+function requiredArg(args: Record<string, unknown>, name: string): string {
+	const value = stringValue(args[name]);
+	if (!value) {
+		throw new Error(`Missing required argument: ${name}`);
+	}
+	return value;
+}
+
 function parseGatewayCommand(content: string): "status" | undefined {
 	const normalized = content.trim().toLowerCase();
 	return normalized === "status" || normalized === "/status"
@@ -1147,6 +1500,10 @@ function stringValue(value: unknown): string | undefined {
 
 function compactId(value: string): string {
 	return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-6)}` : value;
+}
+
+function delegationId(threadId: string): string {
+	return `delegation-${createHash("sha256").update(threadId).digest("hex").slice(0, 12)}`;
 }
 
 function clearSummary(input: {

@@ -196,6 +196,8 @@ describe("parseConfig", () => {
 				"home-channel",
 				"--main-thread-id",
 				"main-thread",
+				"--flow-backend-url",
+				"http://127.0.0.1:8089",
 			],
 			{},
 		);
@@ -204,6 +206,7 @@ describe("parseConfig", () => {
 			{
 				CODEX_DISCORD_GATEWAY_HOME_CHANNEL_ID: "env-home",
 				CODEX_DISCORD_GATEWAY_MAIN_THREAD_ID: "env-thread",
+				CODEX_FLOW_BACKEND_URL: "http://127.0.0.1:8090",
 			},
 		);
 
@@ -214,10 +217,12 @@ describe("parseConfig", () => {
 				homeChannelId: "home-channel",
 				mainThreadId: "main-thread",
 			});
+			expect(fromFlag.config.flowBackendUrl).toBe("http://127.0.0.1:8089");
 			expect(fromEnv.config.gateway).toEqual({
 				homeChannelId: "env-home",
 				mainThreadId: "env-thread",
 			});
+			expect(fromEnv.config.flowBackendUrl).toBe("http://127.0.0.1:8090");
 		}
 	});
 

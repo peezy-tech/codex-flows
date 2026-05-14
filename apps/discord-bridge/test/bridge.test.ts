@@ -52,6 +52,18 @@ describe("DiscordCodexBridge", () => {
 		await bridge.start();
 		await waitFor(() => bridge.stateForTest().sessions.length === 1);
 		expect(client.startThreadCalls).toHaveLength(1);
+		expect(client.startThreadCalls[0]?.dynamicTools).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					namespace: "codex_gateway",
+					name: "start_delegation",
+				}),
+				expect.objectContaining({
+					namespace: "codex_gateway",
+					name: "list_flow_runs",
+				}),
+			]),
+		);
 		expect(client.setThreadNameCalls[0]).toEqual({
 			threadId: "codex-thread-1",
 			name: "[discord-gateway] Codex Gateway",
@@ -95,6 +107,119 @@ describe("DiscordCodexBridge", () => {
 		expect(inputText(client.startTurnCalls[0]?.input[0])).toContain(
 			"Home channel: home-channel",
 		);
+		await bridge.stop();
+	});
+
+	test("gateway tool starts and tracks delegated Codex sessions without privileged tools", async () => {
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const store = new MemoryStateStore();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store,
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+			}),
+			now: () => new Date("2026-05-14T12:00:00.000Z"),
+		});
+
+		await bridge.start();
+		await waitFor(() => bridge.stateForTest().sessions.length === 1);
+		client.emitRequest({
+			id: "tool-1",
+			method: "item/tool/call",
+			params: {
+				threadId: "codex-thread-1",
+				turnId: "turn-main",
+				callId: "call-1",
+				namespace: "codex_gateway",
+				tool: "start_delegation",
+				arguments: {
+					cwd: "/workspace/other",
+					title: "Other workspace",
+					prompt: "Inspect the remaining gateway work.",
+					discordDetailThreadId: "detail-thread",
+					parentDiscordMessageId: "home-message",
+				},
+			},
+		});
+
+		await waitFor(() => client.responses.length === 1);
+		expect(client.responseErrors).toEqual([]);
+		expect(client.startThreadCalls).toHaveLength(2);
+		expect(client.startThreadCalls[1]).toEqual(
+			expect.objectContaining({ cwd: "/workspace/other" }),
+		);
+		expect(client.startThreadCalls[1]?.dynamicTools).toBeUndefined();
+		expect(client.setThreadNameCalls[1]).toEqual({
+			threadId: "codex-thread-2",
+			name: "[delegated] Other workspace",
+		});
+		expect(client.startTurnCalls[0]).toEqual(
+			expect.objectContaining({
+				threadId: "codex-thread-2",
+				cwd: "/workspace/other",
+			}),
+		);
+		expect(inputText(client.startTurnCalls[0]?.input[0])).toBe(
+			"Inspect the remaining gateway work.",
+		);
+		expect(bridge.stateForTest().gateway?.delegations).toEqual([
+			expect.objectContaining({
+				codexThreadId: "codex-thread-2",
+				title: "Other workspace",
+				status: "active",
+				cwd: "/workspace/other",
+				discordDetailThreadId: "detail-thread",
+				parentDiscordMessageId: "home-message",
+			}),
+		]);
+		expect(gatewayToolResult(client.responses[0]?.result)).toEqual(
+			expect.objectContaining({
+				turnId: "turn-1",
+				delegation: expect.objectContaining({
+					codexThreadId: "codex-thread-2",
+				}),
+			}),
+		);
+		await bridge.stop();
+	});
+
+	test("gateway rejects dynamic tool calls outside the main operator thread", async () => {
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+			}),
+		});
+
+		await bridge.start();
+		await waitFor(() => bridge.stateForTest().sessions.length === 1);
+		client.emitRequest({
+			id: "tool-1",
+			method: "item/tool/call",
+			params: {
+				threadId: "codex-thread-elsewhere",
+				namespace: "codex_gateway",
+				tool: "list_delegations",
+				arguments: {},
+			},
+		});
+
+		await waitFor(() => client.responseErrors.length === 1);
+		expect(client.responseErrors[0]).toEqual(
+			expect.objectContaining({
+				id: "tool-1",
+				code: -32601,
+				message: "Unknown dynamic tool request",
+			}),
+		);
+		expect(client.responses).toEqual([]);
 		await bridge.stop();
 	});
 
@@ -2404,7 +2529,15 @@ class FakeCodexClient implements CodexBridgeClient {
 	startTurnCalls: v2.TurnStartParams[] = [];
 	steerTurnCalls: v2.TurnSteerParams[] = [];
 	readThreadCalls: v2.ThreadReadParams[] = [];
+	listThreadsCalls: v2.ThreadListParams[] = [];
 	getThreadGoalCalls: v2.ThreadGoalGetParams[] = [];
+	responses: Array<{ id: string | number; result: unknown }> = [];
+	responseErrors: Array<{
+		id: string | number;
+		code: number;
+		message: string;
+		data?: unknown;
+	}> = [];
 	threadTurns = new Map<string, v2.Turn[]>();
 	threadCwds = new Map<string, string>();
 	threadGoals = new Map<string, v2.ThreadGoal | null>();
@@ -2492,6 +2625,15 @@ class FakeCodexClient implements CodexBridgeClient {
 		} as unknown as v2.ThreadReadResponse;
 	}
 
+	async listThreads(params: v2.ThreadListParams): Promise<v2.ThreadListResponse> {
+		this.listThreadsCalls.push(params);
+		return {
+			data: [],
+			nextCursor: null,
+			backwardsCursor: null,
+		};
+	}
+
 	async getThreadGoal(
 		params: v2.ThreadGoalGetParams,
 	): Promise<v2.ThreadGoalGetResponse> {
@@ -2501,7 +2643,18 @@ class FakeCodexClient implements CodexBridgeClient {
 		};
 	}
 
-	respondError(): void {}
+	respond(id: string | number, result: unknown): void {
+		this.responses.push({ id, result });
+	}
+
+	respondError(
+		id: string | number,
+		code: number,
+		message: string,
+		data?: unknown,
+	): void {
+		this.responseErrors.push({ id, code, message, data });
+	}
 
 	resolveAllStartTurns(): void {
 		for (const resolve of this.#startTurnResolvers.splice(0)) {
@@ -2511,6 +2664,12 @@ class FakeCodexClient implements CodexBridgeClient {
 
 	emitNotification(message: JsonRpcNotification): void {
 		for (const listener of this.#notificationListeners) {
+			listener(message);
+		}
+	}
+
+	emitRequest(message: JsonRpcRequest): void {
+		for (const listener of this.#requestListeners) {
 			listener(message);
 		}
 	}
@@ -2663,6 +2822,18 @@ function inputText(value: unknown): string {
 	}
 	const text = (value as { text?: unknown }).text;
 	return typeof text === "string" ? text : "";
+}
+
+function gatewayToolResult(value: unknown): unknown {
+	if (typeof value !== "object" || value === null || !("contentItems" in value)) {
+		return undefined;
+	}
+	const items = (value as { contentItems?: unknown }).contentItems;
+	if (!Array.isArray(items)) {
+		return undefined;
+	}
+	const text = inputText(items[0]);
+	return text ? JSON.parse(text) : undefined;
 }
 
 function statusMessageText(transport: FakeDiscordTransport): string {

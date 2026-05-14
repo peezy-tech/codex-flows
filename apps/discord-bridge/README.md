@@ -15,10 +15,14 @@ CODEX_DISCORD_HOME_CHANNEL_ID=1502107617512919220
 CODEX_DISCORD_MAIN_THREAD_ID=019e2509-ddbb-7380-b97b-41575092d86b
 CODEX_DISCORD_ALLOWED_CHANNEL_IDS=1502107617512919220
 CODEX_DISCORD_DIR=/home/peezy/codex-fork-workspace/codex-flows
+CODEX_FLOW_BACKEND_URL=http://127.0.0.1:8090
 ```
 
 `CODEX_DISCORD_MAIN_THREAD_ID` is optional. If omitted, the bridge creates a new
-main operator thread and stores it in the bridge state file.
+main operator thread, attaches the privileged gateway tools to it, and stores it
+in the bridge state file. Existing configured main threads are resumed as-is;
+recreate the main operator thread if you need to attach gateway tools to a
+thread that predates gateway mode.
 
 In the home channel:
 
@@ -31,19 +35,29 @@ The prompt sent to the main thread uses `[discord-gateway]` framing so the model
 knows it is operating as the gateway over the codex-flows backend, not as a
 single task thread.
 
-## Delegation Direction
+## Delegation Tools
 
 Discord should not become a workspace registry. The main operator thread is the
-place where routing decisions happen. Future privileged backend or MCP tools
-should be attached only to that main thread and expose operations such as:
+place where routing decisions happen. Privileged `codex_gateway` dynamic tools
+are attached only to that main thread and expose:
 
-- list active Codex sessions or backend runs
+- `list_delegations`
+- `start_delegation`
+- `resume_delegation`
+- `send_delegation`
+- `read_delegation`
+- `list_flow_runs`
+- `list_flow_events`
+
+Those tools can:
+
+- list tracked delegated Codex sessions and backend runs/events
 - start a delegated Codex session in a requested cwd
 - resume a delegated Codex session by thread id
 - send a turn to a delegated session
 - observe or summarize delegated session state
-- dispatch, inspect, or replay flow backend events
+- inspect flow backend state through `CODEX_FLOW_BACKEND_URL`
 
-Gateway state already has delegation records for those future tools, including
-optional Discord detail thread ids for noisy work. Final results should return
-to the home channel even when detail threads are used.
+Gateway state stores delegation records, including optional Discord detail
+thread ids for noisy work. Delegated Codex sessions do not receive the privileged
+gateway tools; only the main operator thread can manage delegation.

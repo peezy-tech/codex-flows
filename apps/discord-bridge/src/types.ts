@@ -11,6 +11,7 @@ export type DiscordBridgeConfig = {
 	allowedChannelIds: Set<string>;
 	statePath: string;
 	gateway?: DiscordGatewayConfig;
+	flowBackendUrl?: string;
 	cwd?: string;
 	model?: string;
 	modelProvider?: string;
@@ -127,7 +128,9 @@ export type CodexBridgeClient = {
 	startTurn(params: v2.TurnStartParams): Promise<v2.TurnStartResponse>;
 	steerTurn(params: v2.TurnSteerParams): Promise<v2.TurnSteerResponse>;
 	readThread(params: v2.ThreadReadParams): Promise<v2.ThreadReadResponse>;
+	listThreads(params: v2.ThreadListParams): Promise<v2.ThreadListResponse>;
 	getThreadGoal(params: v2.ThreadGoalGetParams): Promise<v2.ThreadGoalGetResponse>;
+	respond(id: string | number, result: unknown): void;
 	respondError(id: string | number, code: number, message: string, data?: unknown): void;
 };
 
