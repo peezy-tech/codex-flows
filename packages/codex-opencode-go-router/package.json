@@ -1,0 +1,20 @@
+{
+  "name": "@peezy.tech/codex-opencode-go-router",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Responses API router that lets Codex use OpenCode Go chat completions.",
+  "bin": {
+    "codex-opencode-go-router": "./src/router.mjs"
+  },
+  "scripts": {
+    "build": "bun run check",
+    "start": "bun ./src/router.mjs",
+    "check": "node --check ./src/router.mjs && node --check ./test/selftest.mjs",
+    "check:types": "bun run check",
+    "test": "bun ./test/selftest.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -157,6 +157,14 @@ The low-level app-server client package. It exports:
 - `@peezy.tech/codex-flows/rpc`: JSON-RPC helpers and types.
 - `@peezy.tech/codex-flows/generated`: generated Codex app-server protocol types.
 
+### `@peezy.tech/codex-opencode-go-router`
+
+Private workspace package for running a local Responses API adapter that lets
+Codex use OpenCode Go chat-completions providers. It maps Codex Responses
+requests, tool specs, tool-call outputs, and DeepSeek reasoning replay to the
+OpenCode Go upstream surface. See
+`packages/codex-opencode-go-router/README.md`.
+
 ### `flow-runner`
 
 CLI package for listing flow packages, firing every step that matches a
