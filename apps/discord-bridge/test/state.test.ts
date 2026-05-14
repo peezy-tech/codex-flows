@@ -43,6 +43,12 @@ describe("JsonFileStateStore", () => {
 								createdAt: "2026-05-11T00:00:03.000Z",
 							},
 						],
+						processedStopHookEventIds: [
+							"stop-1",
+							"",
+							"stop-1",
+							"stop-2",
+						],
 					},
 					sessions: [
 						{
@@ -121,6 +127,7 @@ describe("JsonFileStateStore", () => {
 						createdAt: "2026-05-11T00:00:03.000Z",
 					},
 				],
+				processedStopHookEventIds: ["stop-1", "stop-2"],
 			});
 			expect(state.sessions).toHaveLength(2);
 			expect(state.sessions[0]?.ownerUserId).toBe("user-1");

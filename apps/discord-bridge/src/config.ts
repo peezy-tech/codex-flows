@@ -166,6 +166,10 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv): ParsedConfi
 			permissions: permissionsProfile
 				? { type: "profile", id: permissionsProfile }
 				: undefined,
+			hookSpoolDir: resolveHomeDir(
+				stringFlag(args, "hook-spool-dir") ??
+					env.CODEX_DISCORD_HOOK_SPOOL_DIR,
+			),
 			debug,
 		},
 	};
@@ -366,6 +370,7 @@ Options:
   --home-channel-id <id>          Enable gateway mode for one Discord home channel
   --main-thread-id <id>           Resume an existing Codex operator thread for gateway mode
   --flow-backend-url <url>        Optional codex-flow-systemd-local backend URL
+  --hook-spool-dir <path>         Directory drained for Codex Stop hook events
   [dir]                           Optional Codex thread directory, resolved from home
   --dir <path>                    Codex thread directory, resolved from home
   --cwd <path>                    Alias for --dir

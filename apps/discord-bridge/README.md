@@ -16,6 +16,7 @@ CODEX_DISCORD_MAIN_THREAD_ID=019e2509-ddbb-7380-b97b-41575092d86b
 CODEX_DISCORD_ALLOWED_CHANNEL_IDS=1502107617512919220
 CODEX_DISCORD_DIR=/home/peezy/codex-fork-workspace/codex-flows
 CODEX_FLOW_BACKEND_URL=http://127.0.0.1:8090
+CODEX_DISCORD_HOOK_SPOOL_DIR=/home/peezy/.codex/discord-bridge/stop-hooks
 ```
 
 `CODEX_DISCORD_MAIN_THREAD_ID` is optional. If omitted, the bridge creates a new
@@ -76,6 +77,64 @@ Delegations support return modes:
 - `detached`: do not loop results back to the main thread; useful for human-continued threads
 
 Automatic result return uses `thread/inject_items` to append structured
-delegation results to the main operator thread's model-visible history. Starting
-a main-thread turn is a separate wake step, so long-running main goals are not
-interrupted; wakes are queued until the main operator thread is idle.
+delegation results to the main operator thread's model-visible history. Codex
+`Stop` hooks, not background thread polling, drive automatic result return:
+the global hook writes durable Stop events into the spool directory, and the
+gateway drains that spool on startup and while running. Starting a main-thread
+turn is a separate wake step, so long-running main goals are not interrupted;
+wakes are queued until the main operator thread is idle.
+
+## Codex Stop Hook
+
+Install the global hook once for the Codex runtime that backs the gateway:
+
+```bash
+codex-discord-bridge hook install
+```
+
+The bridge and hook default to `~/.codex/discord-bridge/stop-hooks`; override
+both with `CODEX_DISCORD_HOOK_SPOOL_DIR` or `--hook-spool-dir` if needed.
+
+The installer enables the current hooks feature in `~/.codex/config.toml`:
+
+```toml
+[features]
+hooks = true
+```
+
+It also registers the Stop hook in `~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codex-discord-bridge hook stop",
+            "timeout": 10,
+            "statusMessage": "Recording Discord gateway Stop event"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+For package-on-demand installs, write a `bunx` command instead:
+
+```bash
+codex-discord-bridge hook install --bunx
+codex-discord-bridge hook install --bunx-package @peezy.tech/codex-flows
+```
+
+The hook is intentionally dumb: it does not read gateway state or call the
+backend. It only writes idempotent Stop-event files. The gateway ignores unknown
+sessions, treats known delegated sessions according to their return mode, and
+uses main-operator Stop events to drain queued wakes.
+
+After changing hook configuration, restart the Codex runtime that backs the
+gateway and trust the hook when Codex asks for review. `hooks/list` should show
+the hook as `trusted`; untrusted hooks are discovered but do not run.

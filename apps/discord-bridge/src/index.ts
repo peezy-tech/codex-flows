@@ -1,20 +1,17 @@
 #!/usr/bin/env bun
-import {
-	CodexAppServerClient,
-	CodexStdioTransport,
-} from "@peezy.tech/codex-flows";
-
-import { DiscordCodexBridge } from "./bridge.ts";
-import { createDiscordConsoleOutput } from "./console-output.ts";
+import type { DiscordCodexBridge } from "./bridge.ts";
+import { handleHookCommand } from "./hook-cli.ts";
 import { parseConfig } from "./config.ts";
-import { DiscordJsBridgeTransport } from "./discord-transport.ts";
 import { createDiscordBridgeLogger } from "./logger.ts";
-import { JsonFileStateStore } from "./state.ts";
 
 async function main(): Promise<void> {
 	let logger = createDiscordBridgeLogger();
 	try {
-		const parsed = parseConfig(Bun.argv.slice(2), process.env);
+		const argv = Bun.argv.slice(2);
+		if (await handleHookCommand(argv)) {
+			return;
+		}
+		const parsed = parseConfig(argv, process.env);
 		if (parsed.type === "help") {
 			process.stdout.write(parsed.text);
 			return;
@@ -23,6 +20,13 @@ async function main(): Promise<void> {
 			debug: parsed.config.debug,
 			logLevel: parsed.config.logLevel,
 		});
+		const { CodexAppServerClient, CodexStdioTransport } = await import(
+			"@peezy.tech/codex-flows"
+		);
+		const { DiscordCodexBridge } = await import("./bridge.ts");
+		const { createDiscordConsoleOutput } = await import("./console-output.ts");
+		const { DiscordJsBridgeTransport } = await import("./discord-transport.ts");
+		const { JsonFileStateStore } = await import("./state.ts");
 		const consoleOutput = parsed.config.consoleOutput === "messages"
 			? createDiscordConsoleOutput()
 			: undefined;

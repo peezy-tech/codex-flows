@@ -1,3 +1,4 @@
+import { watch, type FSWatcher } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -12,12 +13,19 @@ import {
 	createDiscordBridgeLogger,
 	type DiscordBridgeLogger,
 } from "./logger.ts";
+import {
+	archiveStopHookSpoolFile,
+	ensureStopHookSpool,
+	readPendingStopHookSpoolFiles,
+	stopHookSpoolPaths,
+} from "./stop-hook-spool.ts";
 import type {
 	CodexBridgeClient,
 	DiscordBridgeConfig,
 	DiscordGatewayDelegation,
 	DiscordGatewayDelegationReturnMode,
 	DiscordGatewayPendingWake,
+	DiscordGatewayStopHookEvent,
 	DiscordBridgeSession,
 	DiscordBridgeState,
 	DiscordBridgeStateStore,
@@ -31,7 +39,8 @@ import type {
 
 const maxDiscordMessageLength = 2000;
 const gatewayToolsVersion = 1;
-const defaultGatewayReconcileIntervalMs = 10_000;
+const stopHookDrainDebounceMs = 100;
+const stopHookRetryMs = 1_000;
 
 type ThreadSnapshot = {
 	terminalTurnIds: string[];
@@ -54,7 +63,9 @@ export class DiscordCodexBridge {
 	#dedupe: MessageDeduplicator;
 	#logger: DiscordBridgeLogger;
 	#consoleOutput: DiscordConsoleOutput | undefined;
-	#gatewayReconcileTimer: Timer | undefined;
+	#gatewayStopHookWatcher: FSWatcher | undefined;
+	#gatewayStopHookDrainTimer: Timer | undefined;
+	#gatewayStopHookDrainChain: Promise<void> = Promise.resolve();
 
 	constructor(options: {
 		client: CodexBridgeClient;
@@ -132,20 +143,25 @@ export class DiscordCodexBridge {
 		for (const runner of this.#runnersByDiscordThread.values()) {
 			runner.start();
 		}
-		this.#startGatewayReconciler();
+		await this.#startGatewayStopHookSpool();
 	}
 
 	async stop(): Promise<void> {
 		this.#debug("bridge.stop", {
 			runners: this.#runnersByDiscordThread.size,
 		});
-		if (this.#gatewayReconcileTimer) {
-			clearInterval(this.#gatewayReconcileTimer);
-			this.#gatewayReconcileTimer = undefined;
+		if (this.#gatewayStopHookDrainTimer) {
+			clearTimeout(this.#gatewayStopHookDrainTimer);
+			this.#gatewayStopHookDrainTimer = undefined;
+		}
+		if (this.#gatewayStopHookWatcher) {
+			this.#gatewayStopHookWatcher.close();
+			this.#gatewayStopHookWatcher = undefined;
 		}
 		await Promise.all(
 			[...this.#runnersByDiscordThread.values()].map((runner) => runner.stop()),
 		);
+		await this.#gatewayStopHookDrainChain.catch(() => undefined);
 		await this.#persistChain.catch(() => undefined);
 		await this.transport.stop();
 		this.client.close();
@@ -608,6 +624,10 @@ export class DiscordCodexBridge {
 			return;
 		}
 		await runner.handleNotification(message);
+		if (message.method === "turn/completed" && this.#isGatewayMainThread(threadId)) {
+			await this.#processPendingWakes();
+			await this.#persist();
+		}
 	}
 
 	#handleServerRequest(message: JsonRpcRequest): void {
@@ -742,6 +762,7 @@ export class DiscordCodexBridge {
 					toolsVersion: state.gateway?.toolsVersion,
 					delegations: state.gateway?.delegations ?? [],
 					pendingWakes: state.gateway?.pendingWakes ?? [],
+					processedStopHookEventIds: state.gateway?.processedStopHookEventIds ?? [],
 				};
 				this.#registerRunner(existing);
 				await this.#persist();
@@ -805,6 +826,7 @@ export class DiscordCodexBridge {
 				: gatewayToolsVersion,
 			delegations: state.gateway?.delegations ?? [],
 			pendingWakes: state.gateway?.pendingWakes ?? [],
+			processedStopHookEventIds: state.gateway?.processedStopHookEventIds ?? [],
 		};
 		state.sessions.push(session);
 		this.#registerRunner(session);
@@ -834,6 +856,19 @@ export class DiscordCodexBridge {
 			: undefined;
 	}
 
+	#isGatewayMainThread(threadId: string): boolean {
+		const session = this.#gatewaySession();
+		return Boolean(
+			(session && session.codexThreadId === threadId) ||
+				this.#requireState().gateway?.mainThreadId === threadId,
+		);
+	}
+
+	#gatewayStopHookSpoolDir(): string {
+		return this.config.hookSpoolDir ??
+			path.join(path.dirname(this.config.statePath), "stop-hooks");
+	}
+
 	#gatewayDelegations(): DiscordGatewayDelegation[] {
 		const state = this.#requireState();
 		if (!state.gateway) {
@@ -842,6 +877,7 @@ export class DiscordCodexBridge {
 				mainThreadId: this.#gatewaySession()?.codexThreadId,
 				delegations: [],
 				pendingWakes: [],
+				processedStopHookEventIds: [],
 			};
 		}
 		state.gateway.delegations ??= [];
@@ -856,10 +892,26 @@ export class DiscordCodexBridge {
 				mainThreadId: this.#gatewaySession()?.codexThreadId,
 				delegations: [],
 				pendingWakes: [],
+				processedStopHookEventIds: [],
 			};
 		}
 		state.gateway.pendingWakes ??= [];
 		return state.gateway.pendingWakes;
+	}
+
+	#gatewayProcessedStopHookEventIds(): string[] {
+		const state = this.#requireState();
+		if (!state.gateway) {
+			state.gateway = {
+				homeChannelId: this.config.gateway?.homeChannelId ?? "",
+				mainThreadId: this.#gatewaySession()?.codexThreadId,
+				delegations: [],
+				pendingWakes: [],
+				processedStopHookEventIds: [],
+			};
+		}
+		state.gateway.processedStopHookEventIds ??= [];
+		return state.gateway.processedStopHookEventIds;
 	}
 
 	async #startDelegation(args: Record<string, unknown>): Promise<unknown> {
@@ -1028,7 +1080,6 @@ export class DiscordCodexBridge {
 	}
 
 	async #flushDelegationResults(args: Record<string, unknown>): Promise<unknown> {
-		await this.#reconcileDelegations();
 		const groupId = stringValue(args.groupId);
 		const delegations = groupId
 			? this.#gatewayDelegations().filter((delegation) => delegation.groupId === groupId)
@@ -1037,7 +1088,7 @@ export class DiscordCodexBridge {
 			: this.#gatewayDelegations();
 		const flushed: DiscordGatewayDelegation[] = [];
 		for (const delegation of delegations) {
-			if (!delegation.lastFinal || !isTerminalDelegation(delegation)) {
+			if (!isTerminalDelegation(delegation)) {
 				continue;
 			}
 			await this.#recordDelegationResult(delegation);
@@ -1086,93 +1137,157 @@ export class DiscordCodexBridge {
 		}));
 	}
 
-	#startGatewayReconciler(): void {
-		if (!this.config.gateway || this.#gatewayReconcileTimer) {
+	async #startGatewayStopHookSpool(): Promise<void> {
+		if (!this.config.gateway || this.#gatewayStopHookWatcher) {
 			return;
 		}
-		const intervalMs = this.config.reconcileIntervalMs ?? defaultGatewayReconcileIntervalMs;
-		this.#gatewayReconcileTimer = setInterval(() => {
-			void this.#reconcileDelegations().catch((error) => {
-				this.#debug("gateway.delegations.reconcile.failed", {
-					error: errorMessage(error),
-				});
-			});
-		}, intervalMs);
-		void this.#reconcileDelegations().catch((error) => {
-			this.#debug("gateway.delegations.reconcile.failed", {
+		const spoolDir = this.#gatewayStopHookSpoolDir();
+		await ensureStopHookSpool(spoolDir);
+		const pendingDir = stopHookSpoolPaths(spoolDir).pending;
+		this.#gatewayStopHookWatcher = watch(pendingDir, { persistent: false }, () => {
+			this.#scheduleGatewayStopHookDrain();
+		});
+		this.#gatewayStopHookWatcher.on("error", (error) => {
+			this.#debug("gateway.stopHook.watch.failed", {
 				error: errorMessage(error),
 			});
 		});
+		await this.#drainGatewayStopHookSpool();
 	}
 
-	async #reconcileDelegations(): Promise<void> {
-		const delegations = this.#gatewayDelegations();
-		let changed = false;
-		for (const delegation of delegations) {
-			if (delegation.status !== "active") {
-				continue;
-			}
-			const response = await this.client.readThread({
-				threadId: delegation.codexThreadId,
-				includeTurns: true,
-			});
-			const turns = Array.isArray(response.thread.turns) ? response.thread.turns : [];
-			const latest = record(turns[turns.length - 1]);
-			const latestStatus = stringValue(latest.status);
-			if (!latestStatus || !isTerminalTurnStatus(latestStatus)) {
-				continue;
-			}
-			const snapshot = threadSnapshotFromThread(response.thread);
-			delegation.status = latestStatus === "completed" ? "complete" : "failed";
-			delegation.lastTurnId = stringValue(latest.id) ?? snapshot.lastFinal?.turnId ??
-				delegation.lastTurnId;
-			delegation.lastStatus = latestStatus;
-			delegation.lastFinal = snapshot.lastFinal?.text ?? delegation.lastFinal;
-			delegation.completedAt = this.#now().toISOString();
-			delegation.updatedAt = delegation.completedAt;
-			changed = true;
+	#scheduleGatewayStopHookDrain(delayMs = stopHookDrainDebounceMs): void {
+		if (!this.config.gateway) {
+			return;
 		}
-		for (const delegation of delegations) {
-			if (!isTerminalDelegation(delegation) || !delegation.lastFinal) {
+		if (this.#gatewayStopHookDrainTimer) {
+			clearTimeout(this.#gatewayStopHookDrainTimer);
+		}
+		this.#gatewayStopHookDrainTimer = setTimeout(() => {
+			this.#gatewayStopHookDrainTimer = undefined;
+			void this.#drainGatewayStopHookSpool().catch((error) => {
+				this.#debug("gateway.stopHook.drain.failed", {
+					error: errorMessage(error),
+				});
+			});
+		}, delayMs);
+		this.#gatewayStopHookDrainTimer.unref?.();
+	}
+
+	async #drainGatewayStopHookSpool(): Promise<void> {
+		const drain = this.#gatewayStopHookDrainChain
+			.catch(() => undefined)
+			.then(() => this.#drainGatewayStopHookSpoolOnce());
+		this.#gatewayStopHookDrainChain = drain.catch(() => undefined);
+		await drain;
+	}
+
+	async #drainGatewayStopHookSpoolOnce(): Promise<void> {
+		if (!this.config.gateway) {
+			return;
+		}
+		const spoolDir = this.#gatewayStopHookSpoolDir();
+		const files = await readPendingStopHookSpoolFiles(spoolDir);
+		let shouldRetry = false;
+		for (const file of files) {
+			if ("error" in file) {
+				this.#debug("gateway.stopHook.file.invalid", {
+					fileName: file.fileName,
+					error: file.error.message,
+				});
+				await archiveStopHookSpoolFile(file, spoolDir, "failed");
 				continue;
 			}
-			const mode = delegation.returnMode ?? "manual";
-			if (mode === "detached" || mode === "manual") {
+			const processedIds = this.#gatewayProcessedStopHookEventIds();
+			if (processedIds.includes(file.event.id)) {
+				await archiveStopHookSpoolFile(file, spoolDir, "ignored");
 				continue;
 			}
-			await this.#recordDelegationResult(delegation);
-			await this.#mirrorDelegationResult(delegation);
-			changed = true;
-			if (mode === "wake_on_done") {
+			const result = await this.#handleGatewayStopHookEvent(file.event);
+			if (result === "retry") {
+				shouldRetry = true;
+				continue;
+			}
+			processedIds.push(file.event.id);
+			await this.#persist();
+			await archiveStopHookSpoolFile(
+				file,
+				spoolDir,
+				result === "processed" ? "processed" : "ignored",
+			);
+		}
+		if (shouldRetry) {
+			this.#scheduleGatewayStopHookDrain(stopHookRetryMs);
+		}
+	}
+
+	async #handleGatewayStopHookEvent(
+		event: DiscordGatewayStopHookEvent,
+	): Promise<"processed" | "ignored" | "retry"> {
+		if (event.eventName !== "Stop") {
+			return "ignored";
+		}
+		if (this.#isGatewayMainThread(event.sessionId)) {
+			const started = await this.#processPendingWakes({
+				completedThreadId: event.sessionId,
+				completedTurnId: event.turnId,
+			});
+			return started || !this.#gatewayPendingWakes().some((wake) => !wake.startedAt)
+				? "processed"
+				: "retry";
+		}
+		const delegation = this.#delegationForThread(event.sessionId);
+		if (!delegation) {
+			return "ignored";
+		}
+		const completedAt = this.#now().toISOString();
+		delegation.status = "complete";
+		delegation.lastTurnId = event.turnId ?? delegation.lastTurnId;
+		delegation.lastStatus = "completed";
+		delegation.lastFinal = event.lastAssistantMessage ?? delegation.lastFinal;
+		delegation.completedAt = completedAt;
+		delegation.updatedAt = completedAt;
+		await this.#applyDelegationReturnPolicy(delegation);
+		await this.#processPendingWakes();
+		return "processed";
+	}
+
+	async #applyDelegationReturnPolicy(
+		delegation: DiscordGatewayDelegation,
+	): Promise<void> {
+		if (!isTerminalDelegation(delegation)) {
+			return;
+		}
+		const mode = delegation.returnMode ?? "manual";
+		if (mode === "detached" || mode === "manual") {
+			return;
+		}
+		await this.#recordDelegationResult(delegation);
+		await this.#mirrorDelegationResult(delegation);
+		if (mode === "wake_on_done") {
+			this.#enqueueWake({
+				kind: "delegation",
+				delegationIds: [delegation.id],
+				reason: `Delegation ${delegation.title} completed.`,
+			});
+		}
+		if (mode === "wake_on_group" && delegation.groupId) {
+			const group = this.#gatewayDelegations().filter((candidate) =>
+				candidate.groupId === delegation.groupId
+			);
+			if (group.length > 0 && group.every(isTerminalDelegation)) {
 				this.#enqueueWake({
-					kind: "delegation",
-					delegationIds: [delegation.id],
-					reason: `Delegation ${delegation.title} completed.`,
+					kind: "group",
+					groupId: delegation.groupId,
+					delegationIds: group.map((candidate) => candidate.id),
+					reason: `Delegation group ${delegation.groupId} completed.`,
 				});
 			}
-			if (mode === "wake_on_group" && delegation.groupId) {
-				const group = delegations.filter((candidate) =>
-					candidate.groupId === delegation.groupId
-				);
-				if (group.length > 0 && group.every(isTerminalDelegation)) {
-					this.#enqueueWake({
-						kind: "group",
-						groupId: delegation.groupId,
-						delegationIds: group.map((candidate) => candidate.id),
-						reason: `Delegation group ${delegation.groupId} completed.`,
-					});
-				}
-			}
-		}
-		await this.#processPendingWakes();
-		if (changed) {
-			await this.#persist();
 		}
 	}
 
 	async #recordDelegationResult(delegation: DiscordGatewayDelegation): Promise<void> {
 		const gatewaySession = this.#gatewaySession();
-		if (!gatewaySession || delegation.injectedAt || !delegation.lastFinal) {
+		if (!gatewaySession || delegation.injectedAt) {
 			return;
 		}
 		await this.client.injectThreadItems({
@@ -1196,7 +1311,7 @@ export class DiscordCodexBridge {
 
 	async #mirrorDelegationResult(delegation: DiscordGatewayDelegation): Promise<void> {
 		const homeChannelId = this.config.gateway?.homeChannelId;
-		if (!homeChannelId || delegation.mirroredAt || !delegation.lastFinal) {
+		if (!homeChannelId || delegation.mirroredAt) {
 			return;
 		}
 		await this.transport.sendMessage(homeChannelId, delegationResultText(delegation));
@@ -1232,28 +1347,46 @@ export class DiscordCodexBridge {
 		});
 	}
 
-	async #processPendingWakes(): Promise<void> {
+	async #processPendingWakes(options: {
+		completedThreadId?: string;
+		completedTurnId?: string;
+	} = {}): Promise<boolean> {
 		const gatewaySession = this.#gatewaySession();
-		if (!gatewaySession || this.#isSessionRunning(gatewaySession, this.#requireState())) {
-			return;
+		if (
+			!gatewaySession ||
+			this.#isSessionRunning(gatewaySession, this.#requireState(), options)
+		) {
+			return false;
 		}
 		const wake = this.#gatewayPendingWakes().find((candidate) => !candidate.startedAt);
 		if (!wake) {
-			return;
+			return false;
 		}
 		const prompt = wakePrompt(wake, this.#gatewayDelegations());
-		const turn = await this.client.startTurn({
-			threadId: gatewaySession.codexThreadId,
-			input: [{ type: "text", text: prompt, text_elements: [] }],
-			cwd: gatewaySession.cwd ?? this.config.cwd ?? null,
-			model: this.config.model ?? null,
-			serviceTier: this.config.serviceTier ?? null,
-			effort: this.config.effort ?? null,
-			summary: this.config.summary ?? null,
-			approvalPolicy: this.config.approvalPolicy ?? null,
-			permissions: this.config.permissions ?? null,
-			outputSchema: null,
-		});
+		let turn: v2.TurnStartResponse;
+		try {
+			turn = await this.client.startTurn({
+				threadId: gatewaySession.codexThreadId,
+				input: [{ type: "text", text: prompt, text_elements: [] }],
+				cwd: gatewaySession.cwd ?? this.config.cwd ?? null,
+				model: this.config.model ?? null,
+				serviceTier: this.config.serviceTier ?? null,
+				effort: this.config.effort ?? null,
+				summary: this.config.summary ?? null,
+				approvalPolicy: this.config.approvalPolicy ?? null,
+				permissions: this.config.permissions ?? null,
+				outputSchema: null,
+			});
+		} catch (error) {
+			if (errorMessage(error).includes("already has an active turn")) {
+				this.#debug("gateway.wake.deferred.activeTurn", {
+					wakeId: wake.id,
+					error: errorMessage(error),
+				});
+				return false;
+			}
+			throw error;
+		}
 		wake.startedAt = this.#now().toISOString();
 		for (const delegation of this.#gatewayDelegations()) {
 			if (wake.delegationIds.includes(delegation.id)) {
@@ -1267,6 +1400,7 @@ export class DiscordCodexBridge {
 			kind: wake.kind,
 			groupId: wake.groupId,
 		});
+		return true;
 	}
 
 	async #flowBackendGet(
@@ -1326,11 +1460,19 @@ export class DiscordCodexBridge {
 	#isSessionRunning(
 		session: DiscordBridgeSession,
 		state: DiscordBridgeState,
+		options: {
+			completedThreadId?: string;
+			completedTurnId?: string;
+		} = {},
 	): boolean {
 		const hasActiveTurn = state.activeTurns.some(
 			(active) =>
 				active.discordThreadId === session.discordThreadId &&
-				active.codexThreadId === session.codexThreadId,
+				active.codexThreadId === session.codexThreadId &&
+				!(
+					active.codexThreadId === options.completedThreadId &&
+					active.turnId === options.completedTurnId
+				),
 		);
 		if (hasActiveTurn) {
 			return true;
@@ -1339,7 +1481,11 @@ export class DiscordCodexBridge {
 			(item) =>
 				item.discordThreadId === session.discordThreadId &&
 				item.codexThreadId === session.codexThreadId &&
-				item.status !== "failed",
+				item.status !== "failed" &&
+				!(
+					item.codexThreadId === options.completedThreadId &&
+					item.turnId === options.completedTurnId
+				),
 		);
 	}
 

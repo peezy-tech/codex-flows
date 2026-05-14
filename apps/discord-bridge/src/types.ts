@@ -23,6 +23,7 @@ export type DiscordBridgeConfig = {
 	permissions?: v2.PermissionProfileSelectionParams;
 	typingIntervalMs?: number;
 	reconcileIntervalMs?: number;
+	hookSpoolDir?: string;
 	progressMode?: DiscordProgressMode;
 	consoleOutput?: DiscordConsoleOutputMode;
 	logLevel?: DiscordBridgeLogLevelSetting;
@@ -153,6 +154,7 @@ export type DiscordGatewayState = {
 	toolsVersion?: number;
 	delegations: DiscordGatewayDelegation[];
 	pendingWakes?: DiscordGatewayPendingWake[];
+	processedStopHookEventIds?: string[];
 };
 
 export type DiscordGatewayDelegationReturnMode =
@@ -191,6 +193,19 @@ export type DiscordGatewayPendingWake = {
 	reason: string;
 	createdAt: string;
 	startedAt?: string;
+};
+
+export type DiscordGatewayStopHookEvent = {
+	version: 1;
+	id: string;
+	eventName: "Stop";
+	sessionId: string;
+	turnId?: string;
+	cwd?: string;
+	transcriptPath?: string;
+	lastAssistantMessage?: string;
+	stopHookActive?: boolean;
+	createdAt: string;
 };
 
 export type DiscordBridgeSession = {

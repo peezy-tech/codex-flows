@@ -15,6 +15,7 @@ import type {
 
 const maxProcessedMessageIds = 1000;
 const maxDeliveries = 500;
+const maxProcessedStopHookEventIds = 2000;
 
 export class JsonFileStateStore implements DiscordBridgeStateStore {
 	readonly path: string;
@@ -74,6 +75,12 @@ export function trimState(state: DiscordBridgeState): void {
 		-maxProcessedMessageIds,
 	);
 	state.deliveries = state.deliveries.slice(-maxDeliveries);
+	if (state.gateway?.processedStopHookEventIds) {
+		state.gateway.processedStopHookEventIds =
+			state.gateway.processedStopHookEventIds.slice(
+				-maxProcessedStopHookEventIds,
+			);
+	}
 }
 
 function parseState(value: unknown): DiscordBridgeState {
@@ -119,6 +126,9 @@ function parseGateway(value: unknown): DiscordGatewayState | undefined {
 			: [],
 		pendingWakes: Array.isArray(value.pendingWakes)
 			? value.pendingWakes.map(parseGatewayPendingWake)
+			: [],
+		processedStopHookEventIds: Array.isArray(value.processedStopHookEventIds)
+			? uniqueStrings(value.processedStopHookEventIds)
 			: [],
 	};
 }

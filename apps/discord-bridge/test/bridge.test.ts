@@ -1,3 +1,4 @@
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -10,6 +11,7 @@ import type {
 	DiscordConsoleOutput,
 } from "../src/console-output.ts";
 import { MemoryStateStore, emptyState } from "../src/state.ts";
+import { writeStopHookSpoolEvent } from "../src/stop-hook-spool.ts";
 import type {
 	CodexBridgeClient,
 	DiscordBridgeConfig,
@@ -225,6 +227,7 @@ describe("DiscordCodexBridge", () => {
 	});
 
 	test("gateway records group delegation results and wakes after the group finishes", async () => {
+		const hookSpoolDir = await testHookSpoolDir();
 		const client = new FakeCodexClient();
 		const transport = new FakeDiscordTransport();
 		const bridge = new DiscordCodexBridge({
@@ -233,116 +236,134 @@ describe("DiscordCodexBridge", () => {
 			store: new MemoryStateStore(),
 			config: testConfig({
 				gateway: { homeChannelId: "home-channel" },
-				reconcileIntervalMs: 10,
+				hookSpoolDir,
 			}),
 			now: () => new Date("2026-05-14T12:00:00.000Z"),
 		});
 
-		await bridge.start();
-		await waitFor(() => bridge.stateForTest().sessions.length === 1);
-		for (const [index, title] of ["Workspace A", "Workspace B"].entries()) {
+		try {
+			await bridge.start();
+			await waitFor(() => bridge.stateForTest().sessions.length === 1);
+			for (const [index, title] of ["Workspace A", "Workspace B"].entries()) {
+				client.emitRequest({
+					id: `tool-${index}`,
+					method: "item/tool/call",
+					params: {
+						threadId: "codex-thread-1",
+						namespace: "codex_gateway",
+						tool: "start_delegation",
+						arguments: {
+							cwd: `/workspace/${index}`,
+							title,
+							prompt: `Inspect ${title}.`,
+							groupId: "fanout",
+						},
+					},
+				});
+				await waitFor(() => client.responses.length === index + 1);
+			}
+
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-2",
+				turnId: "turn-1",
+				lastAssistantMessage: "Result A.",
+			});
+			await waitFor(() => client.injectThreadItemsCalls.length === 1);
+			expect(client.startTurnCalls).toHaveLength(2);
+			expect(client.readThreadCalls).toEqual([]);
+			expect(transport.messages.some((message) =>
+				message.channelId === "home-channel" &&
+				message.text.includes("Result A.")
+			)).toBe(true);
+
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-3",
+				turnId: "turn-2",
+				lastAssistantMessage: "Result B.",
+			});
+			await waitFor(() => client.startTurnCalls.length === 3);
+			expect(client.injectThreadItemsCalls).toHaveLength(2);
+			expect(client.startTurnCalls[2]).toEqual(
+				expect.objectContaining({
+					threadId: "codex-thread-1",
+				}),
+			);
+			expect(inputText(client.startTurnCalls[2]?.input[0])).toContain(
+				"Delegation group fanout completed.",
+			);
+			expect(bridge.stateForTest().gateway?.pendingWakes?.[0]).toEqual(
+				expect.objectContaining({
+					kind: "group",
+					groupId: "fanout",
+					startedAt: "2026-05-14T12:00:00.000Z",
+				}),
+			);
+			await sleep(30);
+			expect(client.startTurnCalls).toHaveLength(3);
+			expect(bridge.stateForTest().gateway?.pendingWakes).toHaveLength(1);
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
+		}
+	});
+
+	test("gateway detached delegations complete without injecting or waking the main thread", async () => {
+		const hookSpoolDir = await testHookSpoolDir();
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+				hookSpoolDir,
+			}),
+			now: () => new Date("2026-05-14T12:00:00.000Z"),
+		});
+
+		try {
+			await bridge.start();
+			await waitFor(() => bridge.stateForTest().sessions.length === 1);
 			client.emitRequest({
-				id: `tool-${index}`,
+				id: "tool-1",
 				method: "item/tool/call",
 				params: {
 					threadId: "codex-thread-1",
 					namespace: "codex_gateway",
 					tool: "start_delegation",
 					arguments: {
-						cwd: `/workspace/${index}`,
-						title,
-						prompt: `Inspect ${title}.`,
-						groupId: "fanout",
+						cwd: "/workspace/detached",
+						title: "Detached workspace",
+						prompt: "Prepare this for a human.",
+						returnMode: "detached",
 					},
 				},
 			});
-			await waitFor(() => client.responses.length === index + 1);
+
+			await waitFor(() => client.responses.length === 1);
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-2",
+				turnId: "turn-1",
+				lastAssistantMessage: "Detached result.",
+			});
+			await waitFor(() =>
+				bridge.stateForTest().gateway?.delegations[0]?.status === "complete"
+			);
+			expect(client.injectThreadItemsCalls).toEqual([]);
+			expect(client.startTurnCalls).toHaveLength(1);
+			expect(client.readThreadCalls).toEqual([]);
+			expect(transport.messages.some((message) =>
+				message.text.includes("Detached result.")
+			)).toBe(false);
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
 		}
-
-		client.threadTurns.set("codex-thread-2", [
-			completedTurn("turn-1", "Result A."),
-		]);
-		await waitFor(() => client.injectThreadItemsCalls.length === 1);
-		expect(client.startTurnCalls).toHaveLength(2);
-		expect(transport.messages.some((message) =>
-			message.channelId === "home-channel" &&
-			message.text.includes("Result A.")
-		)).toBe(true);
-
-		client.threadTurns.set("codex-thread-3", [
-			completedTurn("turn-2", "Result B."),
-		]);
-		await waitFor(() => client.startTurnCalls.length === 3);
-		expect(client.injectThreadItemsCalls).toHaveLength(2);
-		expect(client.startTurnCalls[2]).toEqual(
-			expect.objectContaining({
-				threadId: "codex-thread-1",
-			}),
-		);
-		expect(inputText(client.startTurnCalls[2]?.input[0])).toContain(
-			"Delegation group fanout completed.",
-		);
-		expect(bridge.stateForTest().gateway?.pendingWakes?.[0]).toEqual(
-			expect.objectContaining({
-				kind: "group",
-				groupId: "fanout",
-				startedAt: "2026-05-14T12:00:00.000Z",
-			}),
-		);
-		await sleep(30);
-		expect(client.startTurnCalls).toHaveLength(3);
-		expect(bridge.stateForTest().gateway?.pendingWakes).toHaveLength(1);
-		await bridge.stop();
-	});
-
-	test("gateway detached delegations complete without injecting or waking the main thread", async () => {
-		const client = new FakeCodexClient();
-		const transport = new FakeDiscordTransport();
-		const bridge = new DiscordCodexBridge({
-			client,
-			transport,
-			store: new MemoryStateStore(),
-			config: testConfig({
-				gateway: { homeChannelId: "home-channel" },
-				reconcileIntervalMs: 10,
-			}),
-			now: () => new Date("2026-05-14T12:00:00.000Z"),
-		});
-
-		await bridge.start();
-		await waitFor(() => bridge.stateForTest().sessions.length === 1);
-		client.emitRequest({
-			id: "tool-1",
-			method: "item/tool/call",
-			params: {
-				threadId: "codex-thread-1",
-				namespace: "codex_gateway",
-				tool: "start_delegation",
-				arguments: {
-					cwd: "/workspace/detached",
-					title: "Detached workspace",
-					prompt: "Prepare this for a human.",
-					returnMode: "detached",
-				},
-			},
-		});
-
-		await waitFor(() => client.responses.length === 1);
-		client.threadTurns.set("codex-thread-2", [
-			completedTurn("turn-1", "Detached result."),
-		]);
-		await waitFor(() =>
-			bridge.stateForTest().gateway?.delegations[0]?.status === "complete"
-		);
-		expect(client.injectThreadItemsCalls).toEqual([]);
-		expect(client.startTurnCalls).toHaveLength(1);
-		expect(transport.messages.some((message) =>
-			message.text.includes("Detached result.")
-		)).toBe(false);
-		await bridge.stop();
 	});
 
 	test("gateway queues delegation wake while the main operator thread is busy", async () => {
+		const hookSpoolDir = await testHookSpoolDir();
 		const client = new FakeCodexClient();
 		const transport = new FakeDiscordTransport();
 		const bridge = new DiscordCodexBridge({
@@ -351,59 +372,77 @@ describe("DiscordCodexBridge", () => {
 			store: new MemoryStateStore(),
 			config: testConfig({
 				gateway: { homeChannelId: "home-channel" },
-				reconcileIntervalMs: 10,
+				hookSpoolDir,
 			}),
 			now: () => new Date("2026-05-14T12:00:00.000Z"),
 		});
 
-		await bridge.start();
-		await waitFor(() => bridge.stateForTest().sessions.length === 1);
-		transport.emit({
-			kind: "message",
-			channelId: "home-channel",
-			messageId: "home-message-1",
-			author: { id: "user-1", name: "Peezy", isBot: false },
-			content: "work on a long-running main task",
-			createdAt: "2026-05-14T12:00:00.000Z",
-		});
-		await waitFor(() => bridge.stateForTest().activeTurns.length === 1);
+		try {
+			await bridge.start();
+			await waitFor(() => bridge.stateForTest().sessions.length === 1);
+			transport.emit({
+				kind: "message",
+				channelId: "home-channel",
+				messageId: "home-message-1",
+				author: { id: "user-1", name: "Peezy", isBot: false },
+				content: "work on a long-running main task",
+				createdAt: "2026-05-14T12:00:00.000Z",
+			});
+			await waitFor(() => bridge.stateForTest().activeTurns.length === 1);
 
-		client.emitRequest({
-			id: "tool-1",
-			method: "item/tool/call",
-			params: {
-				threadId: "codex-thread-1",
-				namespace: "codex_gateway",
-				tool: "start_delegation",
-				arguments: {
-					cwd: "/workspace/side",
-					title: "Side task",
-					prompt: "Finish this side task.",
+			client.emitRequest({
+				id: "tool-1",
+				method: "item/tool/call",
+				params: {
+					threadId: "codex-thread-1",
+					namespace: "codex_gateway",
+					tool: "start_delegation",
+					arguments: {
+						cwd: "/workspace/side",
+						title: "Side task",
+						prompt: "Finish this side task.",
+					},
 				},
-			},
-		});
+			});
 
-		await waitFor(() => client.responses.length === 1);
-		client.threadTurns.set("codex-thread-2", [
-			completedTurn("turn-2", "Side task result."),
-		]);
-		await waitFor(() => client.injectThreadItemsCalls.length === 1);
-		expect(client.startTurnCalls).toHaveLength(2);
-		expect(bridge.stateForTest().gateway?.pendingWakes?.[0]).toEqual(
-			expect.objectContaining({
-				kind: "delegation",
-			}),
-		);
-		expect(bridge.stateForTest().gateway?.pendingWakes?.[0]).not.toHaveProperty(
-			"startedAt",
-		);
-		await sleep(30);
-		expect(client.startTurnCalls).toHaveLength(2);
-		expect(bridge.stateForTest().gateway?.pendingWakes).toHaveLength(1);
-		await bridge.stop();
+			await waitFor(() => client.responses.length === 1);
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-2",
+				turnId: "turn-2",
+				lastAssistantMessage: "Side task result.",
+			});
+			await waitFor(() => client.injectThreadItemsCalls.length === 1);
+			expect(client.startTurnCalls).toHaveLength(2);
+			expect(bridge.stateForTest().gateway?.pendingWakes?.[0]).toEqual(
+				expect.objectContaining({
+					kind: "delegation",
+				}),
+			);
+			expect(bridge.stateForTest().gateway?.pendingWakes?.[0]).not.toHaveProperty(
+				"startedAt",
+			);
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-1",
+				turnId: "turn-1",
+				lastAssistantMessage: "Main task paused.",
+			});
+			await waitFor(() => client.startTurnCalls.length === 3);
+			expect(inputText(client.startTurnCalls[2]?.input[0])).toContain(
+				"Delegation Side task completed.",
+			);
+			expect(bridge.stateForTest().gateway?.pendingWakes?.[0]).toEqual(
+				expect.objectContaining({
+					startedAt: "2026-05-14T12:00:00.000Z",
+				}),
+			);
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
+		}
 	});
 
 	test("gateway record-only delegations inject and mirror without waking", async () => {
+		const hookSpoolDir = await testHookSpoolDir();
 		const client = new FakeCodexClient();
 		const transport = new FakeDiscordTransport();
 		const bridge = new DiscordCodexBridge({
@@ -412,43 +451,184 @@ describe("DiscordCodexBridge", () => {
 			store: new MemoryStateStore(),
 			config: testConfig({
 				gateway: { homeChannelId: "home-channel" },
-				reconcileIntervalMs: 10,
+				hookSpoolDir,
 			}),
 			now: () => new Date("2026-05-14T12:00:00.000Z"),
 		});
 
-		await bridge.start();
-		await waitFor(() => bridge.stateForTest().sessions.length === 1);
-		client.emitRequest({
-			id: "tool-1",
-			method: "item/tool/call",
-			params: {
-				threadId: "codex-thread-1",
-				namespace: "codex_gateway",
-				tool: "start_delegation",
-				arguments: {
-					cwd: "/workspace/record",
-					title: "Record only task",
-					prompt: "Record this result.",
-					returnMode: "record_only",
+		try {
+			await bridge.start();
+			await waitFor(() => bridge.stateForTest().sessions.length === 1);
+			client.emitRequest({
+				id: "tool-1",
+				method: "item/tool/call",
+				params: {
+					threadId: "codex-thread-1",
+					namespace: "codex_gateway",
+					tool: "start_delegation",
+					arguments: {
+						cwd: "/workspace/record",
+						title: "Record only task",
+						prompt: "Record this result.",
+						returnMode: "record_only",
+					},
 				},
+			});
+
+			await waitFor(() => client.responses.length === 1);
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-2",
+				turnId: "turn-1",
+				lastAssistantMessage: "Record-only result.",
+			});
+			await waitFor(() => client.injectThreadItemsCalls.length === 1);
+			expect(client.startTurnCalls).toHaveLength(1);
+			expect(bridge.stateForTest().gateway?.pendingWakes ?? []).toEqual([]);
+			expect(transport.messages.some((message) =>
+				message.text.includes("Record-only result.")
+			)).toBe(true);
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
+		}
+	});
+
+	test("gateway drains queued stop hook events on startup", async () => {
+		const hookSpoolDir = await testHookSpoolDir();
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const store = new MemoryStateStore({
+			...emptyState(),
+			gateway: {
+				homeChannelId: "home-channel",
+				mainThreadId: "codex-thread-1",
+				toolsVersion: 1,
+				delegations: [
+					{
+						id: "delegation-queued",
+						codexThreadId: "codex-thread-2",
+						title: "Queued event task",
+						status: "active",
+						cwd: "/workspace/queued",
+						returnMode: "record_only",
+						createdAt: "2026-05-14T11:59:00.000Z",
+						updatedAt: "2026-05-14T11:59:00.000Z",
+					},
+				],
+				pendingWakes: [],
+				processedStopHookEventIds: [],
 			},
+			sessions: [
+				{
+					discordThreadId: "home-channel",
+					parentChannelId: "home-channel",
+					codexThreadId: "codex-thread-1",
+					title: "Codex Gateway",
+					createdAt: "2026-05-14T11:59:00.000Z",
+					cwd: "/workspace",
+					mode: "gateway",
+				},
+			],
+		});
+		await emitStopHook(hookSpoolDir, {
+			sessionId: "codex-thread-2",
+			turnId: "turn-queued",
+			lastAssistantMessage: "Queued result.",
+			cwd: "/workspace/queued",
+		});
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store,
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+				hookSpoolDir,
+			}),
+			now: () => new Date("2026-05-14T12:00:00.000Z"),
 		});
 
-		await waitFor(() => client.responses.length === 1);
-		client.threadTurns.set("codex-thread-2", [
-			completedTurn("turn-1", "Record-only result."),
-		]);
-		await waitFor(() => client.injectThreadItemsCalls.length === 1);
-		expect(client.startTurnCalls).toHaveLength(1);
-		expect(bridge.stateForTest().gateway?.pendingWakes ?? []).toEqual([]);
-		expect(transport.messages.some((message) =>
-			message.text.includes("Record-only result.")
-		)).toBe(true);
-		await bridge.stop();
+		try {
+			await bridge.start();
+			await waitFor(() => client.injectThreadItemsCalls.length === 1);
+			expect(client.readThreadCalls).toEqual([]);
+			expect(bridge.stateForTest().gateway?.delegations[0]).toEqual(
+				expect.objectContaining({
+					status: "complete",
+					lastTurnId: "turn-queued",
+					lastFinal: "Queued result.",
+					injectedAt: "2026-05-14T12:00:00.000Z",
+				}),
+			);
+			expect(transport.messages.some((message) =>
+				message.text.includes("Queued result.")
+			)).toBe(true);
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
+		}
+	});
+
+	test("gateway stop hook events are idempotent", async () => {
+		const hookSpoolDir = await testHookSpoolDir();
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+				hookSpoolDir,
+			}),
+			now: () => new Date("2026-05-14T12:00:00.000Z"),
+		});
+
+		try {
+			await bridge.start();
+			await waitFor(() => bridge.stateForTest().sessions.length === 1);
+			client.emitRequest({
+				id: "tool-1",
+				method: "item/tool/call",
+				params: {
+					threadId: "codex-thread-1",
+					namespace: "codex_gateway",
+					tool: "start_delegation",
+					arguments: {
+						cwd: "/workspace/idempotent",
+						title: "Idempotent task",
+						prompt: "Return once.",
+						returnMode: "record_only",
+					},
+				},
+			});
+			await waitFor(() => client.responses.length === 1);
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-2",
+				turnId: "turn-1",
+				lastAssistantMessage: "Exactly once.",
+			});
+			await waitFor(() => client.injectThreadItemsCalls.length === 1);
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-2",
+				turnId: "turn-1",
+				lastAssistantMessage: "Duplicate with changed text.",
+			});
+			await sleep(200);
+			expect(client.injectThreadItemsCalls).toHaveLength(1);
+			expect(transport.messages.filter((message) =>
+				message.text.includes("Exactly once.")
+			)).toHaveLength(1);
+			expect(
+				bridge.stateForTest().gateway?.processedStopHookEventIds,
+			).toHaveLength(1);
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
+		}
 	});
 
 	test("gateway manually flushes completed manual delegation results", async () => {
+		const hookSpoolDir = await testHookSpoolDir();
 		const client = new FakeCodexClient();
 		const transport = new FakeDiscordTransport();
 		const bridge = new DiscordCodexBridge({
@@ -457,57 +637,63 @@ describe("DiscordCodexBridge", () => {
 			store: new MemoryStateStore(),
 			config: testConfig({
 				gateway: { homeChannelId: "home-channel" },
-				reconcileIntervalMs: 10,
+				hookSpoolDir,
 			}),
 			now: () => new Date("2026-05-14T12:00:00.000Z"),
 		});
 
-		await bridge.start();
-		await waitFor(() => bridge.stateForTest().sessions.length === 1);
-		client.emitRequest({
-			id: "tool-1",
-			method: "item/tool/call",
-			params: {
-				threadId: "codex-thread-1",
-				namespace: "codex_gateway",
-				tool: "start_delegation",
-				arguments: {
-					cwd: "/workspace/manual",
-					title: "Manual task",
-					prompt: "Finish manually.",
-					returnMode: "manual",
+		try {
+			await bridge.start();
+			await waitFor(() => bridge.stateForTest().sessions.length === 1);
+			client.emitRequest({
+				id: "tool-1",
+				method: "item/tool/call",
+				params: {
+					threadId: "codex-thread-1",
+					namespace: "codex_gateway",
+					tool: "start_delegation",
+					arguments: {
+						cwd: "/workspace/manual",
+						title: "Manual task",
+						prompt: "Finish manually.",
+						returnMode: "manual",
+					},
 				},
-			},
-		});
+			});
 
-		await waitFor(() => client.responses.length === 1);
-		client.threadTurns.set("codex-thread-2", [
-			completedTurn("turn-1", "Manual result."),
-		]);
-		await waitFor(() =>
-			bridge.stateForTest().gateway?.delegations[0]?.status === "complete"
-		);
-		expect(client.injectThreadItemsCalls).toEqual([]);
-		client.emitRequest({
-			id: "tool-2",
-			method: "item/tool/call",
-			params: {
-				threadId: "codex-thread-1",
-				namespace: "codex_gateway",
-				tool: "flush_delegation_results",
-				arguments: {
-					delegationId: bridge.stateForTest().gateway?.delegations[0]?.id,
-					wake: "false",
+			await waitFor(() => client.responses.length === 1);
+			await emitStopHook(hookSpoolDir, {
+				sessionId: "codex-thread-2",
+				turnId: "turn-1",
+				lastAssistantMessage: "Manual result.",
+			});
+			await waitFor(() =>
+				bridge.stateForTest().gateway?.delegations[0]?.status === "complete"
+			);
+			expect(client.injectThreadItemsCalls).toEqual([]);
+			client.emitRequest({
+				id: "tool-2",
+				method: "item/tool/call",
+				params: {
+					threadId: "codex-thread-1",
+					namespace: "codex_gateway",
+					tool: "flush_delegation_results",
+					arguments: {
+						delegationId: bridge.stateForTest().gateway?.delegations[0]?.id,
+						wake: "false",
+					},
 				},
-			},
-		});
+			});
 
-		await waitFor(() => client.injectThreadItemsCalls.length === 1);
-		expect(client.startTurnCalls).toHaveLength(1);
-		expect(transport.messages.some((message) =>
-			message.text.includes("Manual result.")
-		)).toBe(true);
-		await bridge.stop();
+			await waitFor(() => client.injectThreadItemsCalls.length === 1);
+			expect(client.startTurnCalls).toHaveLength(1);
+			expect(transport.messages.some((message) =>
+				message.text.includes("Manual result.")
+			)).toBe(true);
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
+		}
 	});
 
 	test("answers gateway status in the home channel without starting a turn", async () => {
@@ -2914,6 +3100,35 @@ describe("DiscordCodexBridge", () => {
 	});
 });
 
+async function testHookSpoolDir(): Promise<string> {
+	return await mkdtemp(path.join(os.tmpdir(), "discord-bridge-hooks-"));
+}
+
+async function emitStopHook(
+	spoolDir: string,
+	input: {
+		sessionId: string;
+		turnId: string;
+		lastAssistantMessage?: string;
+		cwd?: string;
+	},
+): Promise<void> {
+	await writeStopHookSpoolEvent(
+		{
+			hook_event_name: "Stop",
+			session_id: input.sessionId,
+			turn_id: input.turnId,
+			cwd: input.cwd ?? "/workspace",
+			transcript_path: `/tmp/${input.sessionId}.jsonl`,
+			last_assistant_message: input.lastAssistantMessage ?? null,
+		},
+		{
+			spoolDir,
+			now: () => new Date("2026-05-14T12:00:00.000Z"),
+		},
+	);
+}
+
 function testConfig(
 	overrides: Partial<DiscordBridgeConfig> = {},
 ): DiscordBridgeConfig {
@@ -3253,22 +3468,6 @@ function gatewayToolResult(value: unknown): unknown {
 	}
 	const text = inputText(items[0]);
 	return text ? JSON.parse(text) : undefined;
-}
-
-function completedTurn(id: string, text: string): v2.Turn {
-	return {
-		id,
-		status: "completed",
-		items: [
-			{
-				type: "agentMessage",
-				id: `${id}-message`,
-				text,
-				phase: "final_answer",
-				memoryCitation: null,
-			},
-		],
-	} as unknown as v2.Turn;
 }
 
 function statusMessageText(transport: FakeDiscordTransport): string {
