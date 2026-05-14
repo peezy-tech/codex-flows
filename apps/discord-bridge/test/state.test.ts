@@ -33,6 +33,16 @@ describe("JsonFileStateStore", () => {
 								updatedAt: "2026-05-11T00:00:02.000Z",
 							},
 						],
+						pendingWakes: [
+							{
+								id: "wake-1",
+								kind: "group",
+								delegationIds: ["delegation-1"],
+								groupId: "patchbay",
+								reason: "Group patchbay completed.",
+								createdAt: "2026-05-11T00:00:03.000Z",
+							},
+						],
 					},
 					sessions: [
 						{
@@ -99,6 +109,16 @@ describe("JsonFileStateStore", () => {
 						parentDiscordMessageId: "message-parent",
 						createdAt: "2026-05-11T00:00:01.000Z",
 						updatedAt: "2026-05-11T00:00:02.000Z",
+					},
+				],
+				pendingWakes: [
+					{
+						id: "wake-1",
+						kind: "group",
+						delegationIds: ["delegation-1"],
+						groupId: "patchbay",
+						reason: "Group patchbay completed.",
+						createdAt: "2026-05-11T00:00:03.000Z",
 					},
 				],
 			});

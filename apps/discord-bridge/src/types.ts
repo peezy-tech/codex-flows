@@ -128,6 +128,7 @@ export type CodexBridgeClient = {
 	startTurn(params: v2.TurnStartParams): Promise<v2.TurnStartResponse>;
 	steerTurn(params: v2.TurnSteerParams): Promise<v2.TurnSteerResponse>;
 	readThread(params: v2.ThreadReadParams): Promise<v2.ThreadReadResponse>;
+	injectThreadItems(params: v2.ThreadInjectItemsParams): Promise<v2.ThreadInjectItemsResponse>;
 	listThreads(params: v2.ThreadListParams): Promise<v2.ThreadListResponse>;
 	getThreadGoal(params: v2.ThreadGoalGetParams): Promise<v2.ThreadGoalGetResponse>;
 	respond(id: string | number, result: unknown): void;
@@ -151,18 +152,45 @@ export type DiscordGatewayState = {
 	createdAt?: string;
 	toolsVersion?: number;
 	delegations: DiscordGatewayDelegation[];
+	pendingWakes?: DiscordGatewayPendingWake[];
 };
+
+export type DiscordGatewayDelegationReturnMode =
+	| "detached"
+	| "record_only"
+	| "wake_on_done"
+	| "wake_on_group"
+	| "manual";
 
 export type DiscordGatewayDelegation = {
 	id: string;
 	codexThreadId: string;
 	title: string;
-	status: "active" | "idle" | "failed" | "complete";
+	status: "active" | "idle" | "failed" | "complete" | "reported";
 	cwd?: string;
+	groupId?: string;
+	returnMode?: DiscordGatewayDelegationReturnMode;
 	discordDetailThreadId?: string;
 	parentDiscordMessageId?: string;
+	lastTurnId?: string;
+	lastStatus?: string;
+	lastFinal?: string;
+	completedAt?: string;
+	injectedAt?: string;
+	mirroredAt?: string;
+	reportedAt?: string;
 	createdAt: string;
 	updatedAt: string;
+};
+
+export type DiscordGatewayPendingWake = {
+	id: string;
+	kind: "delegation" | "group";
+	delegationIds: string[];
+	groupId?: string;
+	reason: string;
+	createdAt: string;
+	startedAt?: string;
 };
 
 export type DiscordBridgeSession = {

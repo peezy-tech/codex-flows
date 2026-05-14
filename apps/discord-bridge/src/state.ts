@@ -117,6 +117,9 @@ function parseGateway(value: unknown): DiscordGatewayState | undefined {
 		delegations: Array.isArray(value.delegations)
 			? value.delegations.map(parseGatewayDelegation)
 			: [],
+		pendingWakes: Array.isArray(value.pendingWakes)
+			? value.pendingWakes.map(parseGatewayPendingWake)
+			: [],
 	};
 }
 
@@ -129,7 +132,8 @@ function parseGatewayDelegation(value: unknown): DiscordGatewayDelegation {
 		status !== "active" &&
 		status !== "idle" &&
 		status !== "failed" &&
-		status !== "complete"
+		status !== "complete" &&
+		status !== "reported"
 	) {
 		throw new Error("Invalid Discord bridge gateway delegation status");
 	}
@@ -142,11 +146,55 @@ function parseGatewayDelegation(value: unknown): DiscordGatewayDelegation {
 		title: requiredString(value.title, "gateway.delegations.title"),
 		status,
 		cwd: optionalString(value.cwd),
+		groupId: optionalString(value.groupId),
+		returnMode: parseReturnMode(value.returnMode),
 		discordDetailThreadId: optionalString(value.discordDetailThreadId),
 		parentDiscordMessageId: optionalString(value.parentDiscordMessageId),
+		lastTurnId: optionalString(value.lastTurnId),
+		lastStatus: optionalString(value.lastStatus),
+		lastFinal: optionalString(value.lastFinal),
+		completedAt: optionalString(value.completedAt),
+		injectedAt: optionalString(value.injectedAt),
+		mirroredAt: optionalString(value.mirroredAt),
+		reportedAt: optionalString(value.reportedAt),
 		createdAt: requiredString(value.createdAt, "gateway.delegations.createdAt"),
 		updatedAt: requiredString(value.updatedAt, "gateway.delegations.updatedAt"),
 	};
+}
+
+function parseGatewayPendingWake(
+	value: unknown,
+): NonNullable<DiscordGatewayState["pendingWakes"]>[number] {
+	if (!isRecord(value)) {
+		throw new Error("Invalid Discord bridge gateway pending wake");
+	}
+	const kind = value.kind === "delegation" || value.kind === "group"
+		? value.kind
+		: undefined;
+	if (!kind) {
+		throw new Error("Invalid Discord bridge gateway pending wake kind");
+	}
+	return {
+		id: requiredString(value.id, "gateway.pendingWakes.id"),
+		kind,
+		delegationIds: Array.isArray(value.delegationIds)
+			? uniqueStrings(value.delegationIds)
+			: [],
+		groupId: optionalString(value.groupId),
+		reason: requiredString(value.reason, "gateway.pendingWakes.reason"),
+		createdAt: requiredString(value.createdAt, "gateway.pendingWakes.createdAt"),
+		startedAt: optionalString(value.startedAt),
+	};
+}
+
+function parseReturnMode(value: unknown): DiscordGatewayDelegation["returnMode"] {
+	return value === "detached" ||
+			value === "record_only" ||
+			value === "wake_on_done" ||
+			value === "wake_on_group" ||
+			value === "manual"
+		? value
+		: undefined;
 }
 
 function parseActiveTurn(value: unknown): DiscordBridgeActiveTurn {

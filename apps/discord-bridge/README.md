@@ -46,6 +46,9 @@ are attached only to that main thread and expose:
 - `resume_delegation`
 - `send_delegation`
 - `read_delegation`
+- `set_delegation_policy`
+- `flush_delegation_results`
+- `list_delegation_groups`
 - `list_flow_runs`
 - `list_flow_events`
 
@@ -56,8 +59,23 @@ Those tools can:
 - resume a delegated Codex session by thread id
 - send a turn to a delegated session
 - observe or summarize delegated session state
+- group delegations for fan-out/fan-in coordination
+- record completed delegation results into the main operator thread
 - inspect flow backend state through `CODEX_FLOW_BACKEND_URL`
 
 Gateway state stores delegation records, including optional Discord detail
 thread ids for noisy work. Delegated Codex sessions do not receive the privileged
 gateway tools; only the main operator thread can manage delegation.
+
+Delegations support return modes:
+
+- `wake_on_done`: inject and mirror the result, then wake the main operator when idle
+- `wake_on_group`: inject and mirror each result, then wake once the whole group is terminal
+- `record_only`: inject and mirror results without waking the main operator
+- `manual`: keep results in gateway state until `flush_delegation_results`
+- `detached`: do not loop results back to the main thread; useful for human-continued threads
+
+Automatic result return uses `thread/inject_items` to append structured
+delegation results to the main operator thread's model-visible history. Starting
+a main-thread turn is a separate wake step, so long-running main goals are not
+interrupted; wakes are queued until the main operator thread is idle.

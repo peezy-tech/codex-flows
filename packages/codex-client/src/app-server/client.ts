@@ -117,6 +117,12 @@ export class CodexAppServerClient extends CodexEventEmitter {
 		return this.request<v2.ThreadReadResponse>("thread/read", params);
 	}
 
+	injectThreadItems(
+		params: v2.ThreadInjectItemsParams,
+	): Promise<v2.ThreadInjectItemsResponse> {
+		return this.request<v2.ThreadInjectItemsResponse>("thread/inject_items", params);
+	}
+
 	listThreadTurns(
 		params: v2.ThreadTurnsListParams,
 	): Promise<v2.ThreadTurnsListResponse> {
