@@ -289,6 +289,9 @@ describe("DiscordCodexBridge", () => {
 				startedAt: "2026-05-14T12:00:00.000Z",
 			}),
 		);
+		await sleep(30);
+		expect(client.startTurnCalls).toHaveLength(3);
+		expect(bridge.stateForTest().gateway?.pendingWakes).toHaveLength(1);
 		await bridge.stop();
 	});
 
@@ -394,6 +397,9 @@ describe("DiscordCodexBridge", () => {
 		expect(bridge.stateForTest().gateway?.pendingWakes?.[0]).not.toHaveProperty(
 			"startedAt",
 		);
+		await sleep(30);
+		expect(client.startTurnCalls).toHaveLength(2);
+		expect(bridge.stateForTest().gateway?.pendingWakes).toHaveLength(1);
 		await bridge.stop();
 	});
 

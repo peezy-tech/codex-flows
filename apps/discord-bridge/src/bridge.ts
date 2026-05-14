@@ -1216,7 +1216,6 @@ export class DiscordCodexBridge {
 		}
 		const wakes = this.#gatewayPendingWakes();
 		if (wakes.some((wake) =>
-			!wake.startedAt &&
 			wake.kind === input.kind &&
 			wake.groupId === input.groupId &&
 			sameStringSet(wake.delegationIds, delegationIds)
