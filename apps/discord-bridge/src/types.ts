@@ -10,6 +10,7 @@ export type DiscordBridgeConfig = {
 	allowedUserIds: Set<string>;
 	allowedChannelIds: Set<string>;
 	statePath: string;
+	gateway?: DiscordGatewayConfig;
 	cwd?: string;
 	model?: string;
 	modelProvider?: string;
@@ -29,6 +30,11 @@ export type DiscordBridgeConfig = {
 
 export type DiscordProgressMode = "summary" | "commentary" | "none";
 export type DiscordConsoleOutputMode = "messages" | "none";
+
+export type DiscordGatewayConfig = {
+	homeChannelId: string;
+	mainThreadId?: string;
+};
 
 export type DiscordAuthor = {
 	id: string;
@@ -127,11 +133,32 @@ export type CodexBridgeClient = {
 
 export type DiscordBridgeState = {
 	version: 1;
+	gateway?: DiscordGatewayState;
 	sessions: DiscordBridgeSession[];
 	queue: DiscordBridgeQueueItem[];
 	activeTurns: DiscordBridgeActiveTurn[];
 	processedMessageIds: string[];
 	deliveries: DiscordBridgeDelivery[];
+};
+
+export type DiscordGatewayState = {
+	homeChannelId: string;
+	mainThreadId?: string;
+	statusMessageId?: string;
+	createdAt?: string;
+	delegations: DiscordGatewayDelegation[];
+};
+
+export type DiscordGatewayDelegation = {
+	id: string;
+	codexThreadId: string;
+	title: string;
+	status: "active" | "idle" | "failed" | "complete";
+	cwd?: string;
+	discordDetailThreadId?: string;
+	parentDiscordMessageId?: string;
+	createdAt: string;
+	updatedAt: string;
 };
 
 export type DiscordBridgeSession = {
@@ -145,7 +172,7 @@ export type DiscordBridgeSession = {
 	ownerUserId?: string;
 	participantUserIds?: string[];
 	cwd?: string;
-	mode?: "new" | "resumed";
+	mode?: "new" | "resumed" | "gateway";
 	statusMessageId?: string;
 };
 

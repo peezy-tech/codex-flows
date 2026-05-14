@@ -125,6 +125,7 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv): ParsedConfi
 					env.CODEX_DISCORD_ALLOWED_CHANNEL_IDS,
 			),
 			statePath,
+			gateway: gatewayConfig(args, env),
 			cwd: resolveHomeDir(
 				stringFlag(args, "dir") ??
 					stringFlag(args, "positional-dir") ??
@@ -267,6 +268,32 @@ function optionalProgressMode(value: string | undefined): DiscordProgressMode | 
 	return value as DiscordProgressMode;
 }
 
+function gatewayConfig(
+	flags: Map<string, string | boolean>,
+	env: NodeJS.ProcessEnv,
+): DiscordBridgeConfig["gateway"] {
+	const homeChannelId =
+		stringFlag(flags, "home-channel-id") ??
+		stringFlag(flags, "gateway-home-channel-id") ??
+		env.CODEX_DISCORD_HOME_CHANNEL_ID ??
+		env.CODEX_DISCORD_GATEWAY_HOME_CHANNEL_ID;
+	const mainThreadId =
+		stringFlag(flags, "main-thread-id") ??
+		stringFlag(flags, "gateway-main-thread-id") ??
+		env.CODEX_DISCORD_MAIN_THREAD_ID ??
+		env.CODEX_DISCORD_GATEWAY_MAIN_THREAD_ID;
+	if (!homeChannelId) {
+		if (mainThreadId) {
+			throw new Error("Cannot set a gateway main thread without a gateway home channel.");
+		}
+		return undefined;
+	}
+	return {
+		homeChannelId,
+		mainThreadId,
+	};
+}
+
 function optionalConsoleOutput(
 	value: string | undefined,
 ): DiscordConsoleOutputMode | undefined {
@@ -332,6 +359,8 @@ Options:
   --local-app-server              Start a local app-server over stdio
   --state-path <path>             Persistent bridge state file
   --allowed-channel-ids <ids>     Comma-separated parent channel ids
+  --home-channel-id <id>          Enable gateway mode for one Discord home channel
+  --main-thread-id <id>           Resume an existing Codex operator thread for gateway mode
   [dir]                           Optional Codex thread directory, resolved from home
   --dir <path>                    Codex thread directory, resolved from home
   --cwd <path>                    Alias for --dir

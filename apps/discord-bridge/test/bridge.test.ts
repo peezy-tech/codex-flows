@@ -36,6 +36,170 @@ describe("DiscordCodexBridge", () => {
 		});
 	});
 
+	test("starts a gateway main thread and routes home channel messages to it", async () => {
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+				allowedChannelIds: new Set(["parent-channel"]),
+			}),
+		});
+
+		await bridge.start();
+		await waitFor(() => bridge.stateForTest().sessions.length === 1);
+		expect(client.startThreadCalls).toHaveLength(1);
+		expect(client.setThreadNameCalls[0]).toEqual({
+			threadId: "codex-thread-1",
+			name: "[discord-gateway] Codex Gateway",
+		});
+		expect(bridge.stateForTest().gateway).toEqual(
+			expect.objectContaining({
+				homeChannelId: "home-channel",
+				mainThreadId: "codex-thread-1",
+			}),
+		);
+		expect(bridge.stateForTest().sessions[0]).toEqual(
+			expect.objectContaining({
+				discordThreadId: "home-channel",
+				parentChannelId: "home-channel",
+				codexThreadId: "codex-thread-1",
+				title: "Codex Gateway",
+				cwd: "/workspace",
+				mode: "gateway",
+			}),
+		);
+
+		transport.emit({
+			kind: "message",
+			channelId: "home-channel",
+			messageId: "home-message-1",
+			author: { id: "user-1", name: "Peezy", isBot: false },
+			content: "status across the workspaces",
+			createdAt: "2026-05-14T00:00:00.000Z",
+		});
+
+		await waitFor(() => client.startTurnCalls.length === 1);
+		expect(inputText(client.startTurnCalls[0]?.input[0])).toContain(
+			"status across the workspaces",
+		);
+		expect(inputText(client.startTurnCalls[0]?.input[0])).toContain(
+			"[discord-gateway]",
+		);
+		expect(inputText(client.startTurnCalls[0]?.input[0])).toContain(
+			"main Codex operator thread",
+		);
+		expect(inputText(client.startTurnCalls[0]?.input[0])).toContain(
+			"Home channel: home-channel",
+		);
+		await bridge.stop();
+	});
+
+	test("answers gateway status in the home channel without starting a turn", async () => {
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+			}),
+		});
+
+		await bridge.start();
+		await waitFor(() => bridge.stateForTest().sessions.length === 1);
+		transport.emit({
+			kind: "message",
+			channelId: "home-channel",
+			messageId: "status-message-1",
+			author: { id: "user-1", name: "Peezy", isBot: false },
+			content: "status",
+			createdAt: "2026-05-14T00:00:00.000Z",
+		});
+
+		await waitFor(() =>
+			transport.messages.some((message) =>
+				message.channelId === "home-channel" &&
+				message.text.includes("**Codex Gateway**")
+			)
+		);
+		expect(client.startTurnCalls).toHaveLength(0);
+		expect(bridge.stateForTest().processedMessageIds).toContain(
+			"status-message-1",
+		);
+		await bridge.stop();
+	});
+
+	test("resumes a configured gateway main thread without creating Discord threads", async () => {
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				gateway: {
+					homeChannelId: "home-channel",
+					mainThreadId: "codex-main-thread",
+				},
+			}),
+		});
+
+		await bridge.start();
+		await waitFor(() => bridge.stateForTest().sessions.length === 1);
+
+		expect(client.startThreadCalls).toHaveLength(0);
+		expect(client.resumeThreadCalls[0]).toEqual(
+			expect.objectContaining({ threadId: "codex-main-thread" }),
+		);
+		expect(transport.createdThreads).toEqual([]);
+		expect(bridge.stateForTest().sessions[0]).toEqual(
+			expect.objectContaining({
+				discordThreadId: "home-channel",
+				codexThreadId: "codex-main-thread",
+				cwd: "/workspace",
+				mode: "gateway",
+			}),
+		);
+		await bridge.stop();
+	});
+
+	test("routes bot mentions in the home channel to the gateway instead of creating threads", async () => {
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+			}),
+		});
+
+		await bridge.start();
+		await waitFor(() => bridge.stateForTest().sessions.length === 1);
+		transport.emit({
+			kind: "threadStart",
+			channelId: "home-channel",
+			sourceMessageId: "mention-message-1",
+			author: { id: "user-1", name: "Peezy", isBot: false },
+			prompt: "<@bot-id> in load-game check active work",
+			mentionedUserIds: ["bot-id"],
+			createdAt: "2026-05-14T00:00:00.000Z",
+		});
+
+		await waitFor(() => client.startTurnCalls.length === 1);
+		expect(transport.createdThreads).toEqual([]);
+		expect(inputText(client.startTurnCalls[0]?.input[0])).toContain(
+			"in load-game check active work",
+		);
+		await bridge.stop();
+	});
+
 	test("starts a Discord thread from a mention and sends summaries only after chunks complete", async () => {
 		const client = new FakeCodexClient();
 		const transport = new FakeDiscordTransport();

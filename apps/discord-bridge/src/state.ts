@@ -9,6 +9,8 @@ import type {
 	DiscordBridgeSession,
 	DiscordBridgeState,
 	DiscordBridgeStateStore,
+	DiscordGatewayDelegation,
+	DiscordGatewayState,
 } from "./types.ts";
 
 const maxProcessedMessageIds = 1000;
@@ -58,6 +60,7 @@ export class MemoryStateStore implements DiscordBridgeStateStore {
 export function emptyState(): DiscordBridgeState {
 	return {
 		version: 1,
+		gateway: undefined,
 		sessions: [],
 		queue: [],
 		activeTurns: [],
@@ -79,6 +82,7 @@ function parseState(value: unknown): DiscordBridgeState {
 	}
 	return {
 		version: 1,
+		gateway: parseGateway(value.gateway),
 		sessions: Array.isArray(value.sessions)
 			? value.sessions.map(parseSession)
 			: [],
@@ -94,6 +98,53 @@ function parseState(value: unknown): DiscordBridgeState {
 		deliveries: Array.isArray(value.deliveries)
 			? value.deliveries.map(parseDelivery)
 			: [],
+	};
+}
+
+function parseGateway(value: unknown): DiscordGatewayState | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (!isRecord(value)) {
+		throw new Error("Invalid Discord bridge gateway state");
+	}
+	return {
+		homeChannelId: requiredString(value.homeChannelId, "gateway.homeChannelId"),
+		mainThreadId: optionalString(value.mainThreadId),
+		statusMessageId: optionalString(value.statusMessageId),
+		createdAt: optionalString(value.createdAt),
+		delegations: Array.isArray(value.delegations)
+			? value.delegations.map(parseGatewayDelegation)
+			: [],
+	};
+}
+
+function parseGatewayDelegation(value: unknown): DiscordGatewayDelegation {
+	if (!isRecord(value)) {
+		throw new Error("Invalid Discord bridge gateway delegation");
+	}
+	const status = value.status;
+	if (
+		status !== "active" &&
+		status !== "idle" &&
+		status !== "failed" &&
+		status !== "complete"
+	) {
+		throw new Error("Invalid Discord bridge gateway delegation status");
+	}
+	return {
+		id: requiredString(value.id, "gateway.delegations.id"),
+		codexThreadId: requiredString(
+			value.codexThreadId,
+			"gateway.delegations.codexThreadId",
+		),
+		title: requiredString(value.title, "gateway.delegations.title"),
+		status,
+		cwd: optionalString(value.cwd),
+		discordDetailThreadId: optionalString(value.discordDetailThreadId),
+		parentDiscordMessageId: optionalString(value.parentDiscordMessageId),
+		createdAt: requiredString(value.createdAt, "gateway.delegations.createdAt"),
+		updatedAt: requiredString(value.updatedAt, "gateway.delegations.updatedAt"),
 	};
 }
 
@@ -208,7 +259,9 @@ function optionalNumber(value: unknown): number | undefined {
 }
 
 function parseSessionMode(value: unknown): DiscordBridgeSession["mode"] {
-	return value === "new" || value === "resumed" ? value : undefined;
+	return value === "new" || value === "resumed" || value === "gateway"
+		? value
+		: undefined;
 }
 
 function uniqueStrings(values: unknown[]): string[] {

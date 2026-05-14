@@ -101,6 +101,7 @@ export class DiscordCodexBridge {
 		this.client.on("request", (message) => this.#handleServerRequest(message));
 		await this.client.connect();
 		this.#debug("client.connected");
+		await this.#ensureGatewaySession();
 		await this.transport.start({
 			onInbound: (inbound) => {
 				void this.#handleInbound(inbound).catch((error) => {
@@ -185,6 +186,10 @@ export class DiscordCodexBridge {
 		}
 
 		if (inbound.kind === "threadStart") {
+			if (this.config.gateway?.homeChannelId === inbound.channelId) {
+				await this.#handleGatewayThreadStart(inbound);
+				return;
+			}
 			if (!this.config.allowedUserIds.has(inbound.author.id)) {
 				this.#debug("threadStart.ignored.user", {
 					channelId: inbound.channelId,
@@ -473,6 +478,10 @@ export class DiscordCodexBridge {
 			});
 			return;
 		}
+		if (this.config.gateway?.homeChannelId === message.channelId) {
+			await this.#handleGatewayMessage(message);
+			return;
+		}
 		const runner = this.#runnersByDiscordThread.get(message.channelId);
 		if (!runner) {
 			this.#debug("message.ignored.noSession", {
@@ -499,6 +508,72 @@ export class DiscordCodexBridge {
 			return;
 		}
 		await runner.enqueueMessage(message);
+	}
+
+	async #handleGatewayThreadStart(start: DiscordThreadStartInbound): Promise<void> {
+		await this.#handleGatewayMessage({
+			kind: "message",
+			channelId: start.channelId,
+			guildId: start.guildId,
+			messageId: start.sourceMessageId,
+			author: start.author,
+			content: threadPrompt(start),
+			createdAt: start.createdAt,
+		});
+	}
+
+	async #handleGatewayMessage(message: DiscordMessageInbound): Promise<void> {
+		if (!this.config.allowedUserIds.has(message.author.id)) {
+			this.#debug("gateway.message.ignored.user", {
+				channelId: message.channelId,
+				messageId: message.messageId,
+				authorId: message.author.id,
+			});
+			return;
+		}
+		const command = parseGatewayCommand(message.content);
+		if (command === "status") {
+			await this.transport.sendMessage(
+				message.channelId,
+				this.#gatewayStatusMessage(),
+			);
+			addProcessedMessageId(this.#requireState(), message.messageId);
+			await this.#persist();
+			return;
+		}
+		const runner = this.#gatewayRunner();
+		if (!runner) {
+			this.#debug("gateway.message.ignored.noSession", {
+				channelId: message.channelId,
+				messageId: message.messageId,
+			});
+			return;
+		}
+		await runner.enqueueMessage(message);
+	}
+
+	#gatewayStatusMessage(): string {
+		const state = this.#requireState();
+		const gateway = state.gateway;
+		const session = this.#gatewaySession();
+		const delegations = gateway?.delegations ?? [];
+		const activeDelegations = delegations.filter((delegation) =>
+			delegation.status === "active"
+		);
+		return [
+			"**Codex Gateway**",
+			`Home channel: \`${this.config.gateway?.homeChannelId ?? "disabled"}\``,
+			`Main thread: \`${session?.codexThreadId ?? gateway?.mainThreadId ?? "none"}\``,
+			`Dir: \`${session?.cwd ?? this.config.cwd ?? "default"}\``,
+			`Legacy thread bridge: \`enabled\``,
+			`Delegations: ${delegations.length} tracked, ${activeDelegations.length} active`,
+			"",
+			"**Delegation Backend**",
+			"Status: prepared for privileged backend/MCP tools; no delegation tool is attached yet.",
+			"",
+			"**Detail Threads**",
+			"Status: optional detail-thread records are supported in state; automatic detail thread mirroring is not enabled yet.",
+		].join("\n");
 	}
 
 	async #handleNotification(message: JsonRpcNotification): Promise<void> {
@@ -547,6 +622,86 @@ export class DiscordCodexBridge {
 		this.#runnersByDiscordThread.set(session.discordThreadId, runner);
 		this.#runnersByCodexThread.set(session.codexThreadId, runner);
 		return runner;
+	}
+
+	async #ensureGatewaySession(): Promise<void> {
+		const gatewayConfig = this.config.gateway;
+		if (!gatewayConfig) {
+			return;
+		}
+		const state = this.#requireState();
+		const existing = this.#gatewaySession();
+		if (existing) {
+			state.gateway = {
+				homeChannelId: gatewayConfig.homeChannelId,
+				mainThreadId: existing.codexThreadId,
+				statusMessageId: existing.statusMessageId,
+				createdAt: existing.createdAt,
+				delegations: state.gateway?.delegations ?? [],
+			};
+			this.#registerRunner(existing);
+			await this.#persist();
+			return;
+		}
+
+		const configuredThreadId =
+			state.gateway?.mainThreadId ??
+			gatewayConfig.mainThreadId;
+		const title = "Codex Gateway";
+		const started = configuredThreadId
+			? await this.client.resumeThread(this.#threadResumeParams(
+					configuredThreadId,
+					this.config.cwd,
+				))
+			: await this.client.startThread(this.#threadStartParams(this.config.cwd));
+		const codexThreadId = started.thread.id;
+		if (!configuredThreadId) {
+			await this.client.setThreadName({
+				threadId: codexThreadId,
+				name: "[discord-gateway] Codex Gateway",
+			});
+		}
+		const session: DiscordBridgeSession = {
+			discordThreadId: gatewayConfig.homeChannelId,
+			parentChannelId: gatewayConfig.homeChannelId,
+			codexThreadId,
+			title,
+			createdAt: this.#now().toISOString(),
+			cwd: resumeResponseCwd(started) ?? this.config.cwd,
+			mode: "gateway",
+		};
+		state.gateway = {
+			homeChannelId: gatewayConfig.homeChannelId,
+			mainThreadId: codexThreadId,
+			createdAt: session.createdAt,
+			delegations: state.gateway?.delegations ?? [],
+		};
+		state.sessions.push(session);
+		this.#registerRunner(session);
+		await this.#persist();
+		this.#debug("gateway.session.ready", {
+			homeChannelId: gatewayConfig.homeChannelId,
+			codexThreadId,
+			resumed: Boolean(configuredThreadId),
+		});
+	}
+
+	#gatewaySession(): DiscordBridgeSession | undefined {
+		const gatewayConfig = this.config.gateway;
+		if (!gatewayConfig) {
+			return undefined;
+		}
+		return this.#requireState().sessions.find((session) =>
+			session.mode === "gateway" &&
+			session.discordThreadId === gatewayConfig.homeChannelId
+		);
+	}
+
+	#gatewayRunner(): DiscordThreadRunner | undefined {
+		const session = this.#gatewaySession();
+		return session
+			? this.#runnersByDiscordThread.get(session.discordThreadId)
+			: undefined;
 	}
 
 	#isSessionRunning(
@@ -971,6 +1126,13 @@ function isDuplicate(state: DiscordBridgeState, messageId: string): boolean {
 		state.queue.some((item) => item.discordMessageId === messageId) ||
 		state.deliveries.some((delivery) => delivery.discordMessageId === messageId)
 	);
+}
+
+function parseGatewayCommand(content: string): "status" | undefined {
+	const normalized = content.trim().toLowerCase();
+	return normalized === "status" || normalized === "/status"
+		? "status"
+		: undefined;
 }
 
 function record(value: unknown): Record<string, unknown> {

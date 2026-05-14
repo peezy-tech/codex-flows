@@ -14,6 +14,25 @@ describe("JsonFileStateStore", () => {
 				statePath,
 				`${JSON.stringify({
 					version: 1,
+					gateway: {
+						homeChannelId: "home-channel",
+						mainThreadId: "codex-gateway-thread",
+						statusMessageId: "message-gateway-status",
+						createdAt: "2026-05-11T00:00:00.000Z",
+						delegations: [
+							{
+								id: "delegation-1",
+								codexThreadId: "codex-delegated-thread",
+								title: "Patchbay webhook work",
+								status: "active",
+								cwd: "/workspace/patchbay",
+								discordDetailThreadId: "discord-detail-thread",
+								parentDiscordMessageId: "message-parent",
+								createdAt: "2026-05-11T00:00:01.000Z",
+								updatedAt: "2026-05-11T00:00:02.000Z",
+							},
+						],
+					},
 					sessions: [
 						{
 							discordThreadId: "discord-thread-1",
@@ -25,7 +44,7 @@ describe("JsonFileStateStore", () => {
 							ownerUserId: "user-1",
 							participantUserIds: ["user-2", "", "user-2", "user-3"],
 							cwd: "/workspace/project",
-							mode: "resumed",
+							mode: "gateway",
 							statusMessageId: "message-status-1",
 						},
 						{
@@ -62,6 +81,25 @@ describe("JsonFileStateStore", () => {
 
 			const state = await new JsonFileStateStore(statePath).load();
 
+			expect(state.gateway).toEqual({
+				homeChannelId: "home-channel",
+				mainThreadId: "codex-gateway-thread",
+				statusMessageId: "message-gateway-status",
+				createdAt: "2026-05-11T00:00:00.000Z",
+				delegations: [
+					{
+						id: "delegation-1",
+						codexThreadId: "codex-delegated-thread",
+						title: "Patchbay webhook work",
+						status: "active",
+						cwd: "/workspace/patchbay",
+						discordDetailThreadId: "discord-detail-thread",
+						parentDiscordMessageId: "message-parent",
+						createdAt: "2026-05-11T00:00:01.000Z",
+						updatedAt: "2026-05-11T00:00:02.000Z",
+					},
+				],
+			});
 			expect(state.sessions).toHaveLength(2);
 			expect(state.sessions[0]?.ownerUserId).toBe("user-1");
 			expect(state.sessions[0]?.sourceMessageId).toBe("message-start-1");
@@ -70,7 +108,7 @@ describe("JsonFileStateStore", () => {
 				"user-3",
 			]);
 			expect(state.sessions[0]?.cwd).toBe("/workspace/project");
-			expect(state.sessions[0]?.mode).toBe("resumed");
+			expect(state.sessions[0]?.mode).toBe("gateway");
 			expect(state.sessions[0]?.statusMessageId).toBe("message-status-1");
 			expect(state.sessions[1]?.ownerUserId).toBeUndefined();
 			expect(state.sessions[1]?.sourceMessageId).toBeUndefined();

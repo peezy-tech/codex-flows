@@ -194,7 +194,7 @@ export class DiscordThreadRunner {
 			input: [
 				{
 					type: "text",
-					text: formatDiscordPrompt({
+					text: this.#formatPrompt({
 						id: `${message.messageId}-steer`,
 						status: "pending",
 						discordMessageId: message.messageId,
@@ -362,7 +362,7 @@ export class DiscordThreadRunner {
 				input: [
 					{
 						type: "text",
-						text: formatDiscordPrompt(item),
+						text: this.#formatPrompt(item),
 						text_elements: [],
 					},
 				],
@@ -1683,6 +1683,10 @@ export class DiscordThreadRunner {
 		return this.#context.config.progressMode ?? "summary";
 	}
 
+	#formatPrompt(item: DiscordBridgeQueueItem): string {
+		return formatDiscordPrompt(item, this.session);
+	}
+
 	#emitConsoleMessage(
 		kind: DiscordConsoleMessageKind,
 		turnId: string | undefined,
@@ -2057,7 +2061,24 @@ function truncateOneLine(value: string, maxLength: number): string {
 	return `${oneLine.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
-function formatDiscordPrompt(item: DiscordBridgeQueueItem): string {
+function formatDiscordPrompt(
+	item: DiscordBridgeQueueItem,
+	session: DiscordBridgeSession,
+): string {
+	if (session.mode === "gateway") {
+		return [
+			"[discord-gateway]",
+			"Role: You are the main Codex operator thread for a single Discord home channel.",
+			"Intent: Treat this as a gateway request. Answer directly when appropriate; otherwise reason about backend/runtime delegation without assuming Discord itself owns a workspace registry.",
+			"Canonical memory: This main Codex thread is the operator memory. Delegated Codex threads remain canonical history for delegated work.",
+			`Author: ${item.authorName} (${item.authorId})`,
+			`Message: ${item.discordMessageId}`,
+			`Home channel: ${item.discordThreadId}`,
+			`Gateway cwd: ${session.cwd ?? "default"}`,
+			"",
+			item.content,
+		].join("\n");
+	}
 	return [
 		"[discord]",
 		`Author: ${item.authorName} (${item.authorId})`,

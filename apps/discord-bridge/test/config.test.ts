@@ -185,6 +185,58 @@ describe("parseConfig", () => {
 		}
 	});
 
+	test("parses gateway home and main thread ids", () => {
+		const fromFlag = parseConfig(
+			[
+				"--token",
+				"discord-token",
+				"--allowed-user-ids",
+				"user-1",
+				"--home-channel-id",
+				"home-channel",
+				"--main-thread-id",
+				"main-thread",
+			],
+			{},
+		);
+		const fromEnv = parseConfig(
+			["--token", "discord-token", "--allowed-user-ids", "user-1"],
+			{
+				CODEX_DISCORD_GATEWAY_HOME_CHANNEL_ID: "env-home",
+				CODEX_DISCORD_GATEWAY_MAIN_THREAD_ID: "env-thread",
+			},
+		);
+
+		expect(fromFlag.type).toBe("run");
+		expect(fromEnv.type).toBe("run");
+		if (fromFlag.type === "run" && fromEnv.type === "run") {
+			expect(fromFlag.config.gateway).toEqual({
+				homeChannelId: "home-channel",
+				mainThreadId: "main-thread",
+			});
+			expect(fromEnv.config.gateway).toEqual({
+				homeChannelId: "env-home",
+				mainThreadId: "env-thread",
+			});
+		}
+	});
+
+	test("rejects gateway main thread without home channel", () => {
+		expect(() =>
+			parseConfig(
+				[
+					"--token",
+					"discord-token",
+					"--allowed-user-ids",
+					"user-1",
+					"--main-thread-id",
+					"main-thread",
+				],
+				{},
+			)
+		).toThrow("Cannot set a gateway main thread without a gateway home channel.");
+	});
+
 	test("can force a local app-server even when workspace URL env is set", () => {
 		const parsed = parseConfig(
 			[
