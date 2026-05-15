@@ -2064,7 +2064,7 @@ export class DiscordCodexBridge {
 		const delegations = this.#gatewayDelegations().filter((delegation) =>
 			workspace.delegationIds.includes(delegation.id)
 		);
-		const threads = this.#listOpenWorkspaceThreads(workspace);
+		const threads = this.#listWorkspaceDashboardThreads(workspace);
 		await this.transport.updateMessage(
 			workspace.discordThreadId,
 			workspace.statusMessageId,
@@ -2076,6 +2076,65 @@ export class DiscordCodexBridge {
 		if (workspace.statusMessageId) {
 			await this.#pinMessage(workspace.discordThreadId, workspace.statusMessageId);
 		}
+	}
+
+	#listWorkspaceDashboardThreads(
+		workspace: DiscordGatewayWorkspaceSurface,
+	): WorkspaceThreadSummary[] {
+		const byId = new Map<string, WorkspaceThreadSummary>();
+		const put = (thread: WorkspaceThreadSummary) => {
+			const existing = byId.get(thread.id);
+			byId.set(thread.id, {
+				...existing,
+				...thread,
+				updatedAt: Math.max(existing?.updatedAt ?? 0, thread.updatedAt),
+				discordThreadId: existing?.discordThreadId ?? thread.discordThreadId,
+			});
+		};
+
+		for (const thread of this.#listOpenWorkspaceThreads(workspace)) {
+			put(thread);
+		}
+		for (const delegation of this.#gatewayDelegations()) {
+			const delegationWorkspaceKey = delegation.workspaceKey ??
+				workspaceKey(workspaceCwdForPath(delegation.cwd, this.config.cwd));
+			if (
+				delegationWorkspaceKey !== workspace.key ||
+				(delegation.status !== "active" && delegation.lastStatus !== "in_progress")
+			) {
+				continue;
+			}
+			put({
+				id: delegation.codexThreadId,
+				title: delegation.title,
+				cwd: delegation.cwd ?? workspace.cwd,
+				status: delegation.lastStatus ?? delegation.status,
+				updatedAt: Date.parse(delegation.updatedAt) / 1000,
+				discordThreadId: delegation.discordTaskThreadId,
+			});
+		}
+		for (const observed of this.#gatewayObservedThreads()) {
+			const observedWorkspaceKey = observed.workspaceKey ??
+				workspaceKey(workspaceCwdForPath(observed.cwd, this.config.cwd));
+			if (
+				observedWorkspaceKey !== workspace.key ||
+				!isObservedThreadActive(observed)
+			) {
+				continue;
+			}
+			put({
+				id: observed.threadId,
+				title: observed.title ?? `Codex ${compactId(observed.threadId)}`,
+				cwd: observed.cwd ?? workspace.cwd,
+				status: observedThreadStatusText(observed),
+				updatedAt: Date.parse(observed.lastSeenAt) / 1000,
+				discordThreadId: this.#workspaceDiscordThreadForCodexThread(
+					observed.threadId,
+				)?.discordThreadId,
+			});
+		}
+
+		return [...byId.values()].sort((left, right) => right.updatedAt - left.updatedAt);
 	}
 
 	async #listWorkspaceThreads(
@@ -2251,12 +2310,7 @@ export class DiscordCodexBridge {
 		}
 
 		for (const observed of this.#gatewayObservedThreads()) {
-			if (
-				observed.status !== "starting" &&
-				observed.status !== "active" &&
-				observed.status !== "tool" &&
-				observed.status !== "waiting"
-			) {
+			if (!isObservedThreadActive(observed)) {
 				continue;
 			}
 			put({
@@ -2640,7 +2694,15 @@ export class DiscordCodexBridge {
 				workspaceCwdForPath(cwd, this.config.cwd),
 				config,
 			);
-			await this.#updateWorkspaceSurface(workspace);
+			try {
+				await this.#updateWorkspaceSurface(workspace);
+			} catch (error) {
+				this.#debug("gateway.observed.workspaceUpdate.failed", {
+					workspaceKey: workspace.key,
+					threadId: observed.threadId,
+					error: errorMessage(error),
+				});
+			}
 		}
 	}
 
@@ -3573,10 +3635,10 @@ function workspaceDashboardText(
 	return [
 		`**Workspace: ${workspace.title}**`,
 		`Dir: \`${workspace.cwd}\``,
-		`Open Discord threads: ${threads.length}`,
+		`Visible threads: ${threads.length}`,
 		`Tracked delegations: ${delegations.length}`,
 		"",
-		"**Open Threads**",
+		"**Visible Threads**",
 		visibleThreads.length > 0
 			? visibleThreads.map(workspaceThreadLine).join("\n")
 			: "None",
@@ -3777,6 +3839,13 @@ function observedThreadStatusText(thread: DiscordGatewayObservedThread): string 
 		return `tool: ${thread.toolName}`;
 	}
 	return thread.status;
+}
+
+function isObservedThreadActive(thread: DiscordGatewayObservedThread): boolean {
+	return thread.status === "starting" ||
+		thread.status === "active" ||
+		thread.status === "tool" ||
+		thread.status === "waiting";
 }
 
 function observedStatusForHookEvent(

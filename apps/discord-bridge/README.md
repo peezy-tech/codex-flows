@@ -105,7 +105,8 @@ When the workbench is enabled:
   post for the top-level workspace containing the delegation cwd
 - bridge startup creates missing workspace forum posts for discoverable folders
   under the main workspace root
-- workspace dashboards list only open Discord task threads for that workspace
+- workspace dashboards list opened Discord task threads plus active hook-observed
+  workspace threads that have not been opened into Discord yet
 - `/threads` lists known Codex threads from `thread/list` plus tracked
   delegations that may not have appeared in the list yet
 - choosing an item from the ephemeral `/threads` picker creates or reuses one

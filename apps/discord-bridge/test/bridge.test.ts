@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -265,8 +265,10 @@ describe("DiscordCodexBridge", () => {
 				message.channelId === "forum-post-1" &&
 				message.messageId === "forum-post-1"
 			);
-			expect(workspaceUpdate?.text).toContain("**Open Threads**\nNone");
-			expect(workspaceUpdate?.text).not.toContain("Hook packaging");
+			expect(workspaceUpdate?.text).toContain("**Visible Threads**");
+			expect(workspaceUpdate?.text).toContain(
+				"1. `not opened` Hook packaging (active)",
+			);
 
 			const replies: string[] = [];
 			transport.emit({
@@ -284,7 +286,7 @@ describe("DiscordCodexBridge", () => {
 			expect(transport.messages.some((message) =>
 				message.channelId === "forum-post-1" &&
 				message.text.includes("Hook packaging")
-			)).toBe(false);
+			)).toBe(true);
 			const picker = transport.ephemeralPickers[0];
 			expect(picker?.text).toContain("1️⃣ `not opened` Hook packaging");
 			expect(picker?.text).toContain(
@@ -471,11 +473,11 @@ describe("DiscordCodexBridge", () => {
 			]);
 			expect(transport.updatedMessages.some((message) =>
 				message.channelId === "forum-post-1" &&
-				message.text.includes("**Open Threads**\nNone")
+				message.text.includes("**Visible Threads**\nNone")
 			)).toBe(true);
 			expect(transport.updatedMessages.some((message) =>
 				message.channelId === "forum-post-2" &&
-				message.text.includes("**Open Threads**\nNone")
+				message.text.includes("**Visible Threads**\nNone")
 			)).toBe(true);
 			const replies: string[] = [];
 			transport.emit({
@@ -602,6 +604,12 @@ describe("DiscordCodexBridge", () => {
 					permissionDescription: "Needs network",
 				}),
 			);
+			await waitFor(() => transport.updatedMessages.some((message) =>
+				message.channelId === "forum-post-1" &&
+				message.text.includes(
+					"1. `not opened` Inspect observed runtime activity. (waiting: Needs network)",
+				)
+			));
 
 			const replies: string[] = [];
 			transport.emit({
@@ -619,7 +627,7 @@ describe("DiscordCodexBridge", () => {
 			expect(transport.messages.some((message) =>
 				message.channelId === "forum-post-1" &&
 				message.text.includes("Inspect observed runtime activity")
-			)).toBe(false);
+			)).toBe(true);
 			const picker = transport.ephemeralPickers[0];
 			expect(picker?.text).toContain(
 				"1️⃣ `not opened` Inspect observed runtime activity. (waiting: Needs network)",
@@ -639,6 +647,54 @@ describe("DiscordCodexBridge", () => {
 				name: "alpha: Inspect observed runtime activity.",
 				sourceMessageId: undefined,
 			});
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test("gateway hook drain continues when workspace dashboard updates fail", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "discord-observed-fail-"));
+		const hookSpoolDir = await testHookSpoolDir();
+		await mkdir(path.join(root, "alpha", "project"), { recursive: true });
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				cwd: root,
+				gateway: {
+					homeChannelId: "home-channel",
+					workspaceForumChannelId: "workspace-forum",
+					taskThreadsChannelId: "task-channel",
+				},
+				hookSpoolDir,
+			}),
+			now: () => new Date("2026-05-14T12:00:00.000Z"),
+		});
+
+		try {
+			await bridge.start();
+			transport.failUpdateMessages = true;
+			await emitHookEvent(hookSpoolDir, {
+				eventName: "UserPromptSubmit",
+				sessionId: "codex-observed-fail",
+				turnId: "turn-observed-fail",
+				cwd: path.join(root, "alpha", "project"),
+				prompt: "Keep draining hooks.",
+			});
+			await waitFor(() =>
+				bridge.stateForTest().gateway?.observedThreads?.some((thread) =>
+					thread.threadId === "codex-observed-fail" &&
+					thread.status === "active"
+				) ?? false
+			);
+			await waitFor(async () =>
+				(await readdir(path.join(hookSpoolDir, "pending"))).length === 0
+			);
 		} finally {
 			await bridge.stop();
 			await rm(hookSpoolDir, { recursive: true, force: true });
@@ -4322,6 +4378,7 @@ class FakeDiscordTransport implements DiscordBridgeTransport {
 		text: string;
 		webhookId?: string;
 	}> = [];
+	failUpdateMessages = false;
 	ephemeralPickers: DiscordEphemeralPicker[] = [];
 	ephemeralUpdates: Array<{
 		pickerId: string;
@@ -4398,6 +4455,9 @@ class FakeDiscordTransport implements DiscordBridgeTransport {
 		messageId: string,
 		text: string,
 	): Promise<void> {
+		if (this.failUpdateMessages) {
+			throw new Error("Discord update failed");
+		}
 		this.updatedMessages.push({ channelId, messageId, text });
 		const message = this.messages.find((candidate) => candidate.id === messageId);
 		if (message) {
