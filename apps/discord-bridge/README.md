@@ -4,9 +4,11 @@ Long-lived Discord sidecar for connecting Discord to Codex app-server threads.
 
 ## Gateway Mode
 
-Gateway mode is opt-in. It keeps one Discord home channel as the primary UX and
-one main Codex thread as the operator memory for the gateway. Legacy
-thread-per-task behavior remains available outside the configured home channel.
+Gateway mode is opt-in. It keeps one Discord home surface as the primary UX, or
+several guild-scoped surfaces when multi-guild routing is configured, and one
+main Codex thread as the operator memory for the gateway. Legacy
+thread-per-task behavior remains available outside the configured gateway
+channels.
 
 Set these environment values before starting the bridge:
 
@@ -21,20 +23,44 @@ CODEX_FLOW_BACKEND_URL=http://127.0.0.1:8090
 CODEX_DISCORD_HOOK_SPOOL_DIR=/home/peezy/.codex/discord-bridge/stop-hooks
 ```
 
+Single-surface `.env` configuration remains supported and acts as the default
+surface. For multiple guilds, define a workspace-owned surface in that
+workspace's `.codex/workspace.toml`, and keep one bridge process. The bridge
+checks the resolved `CODEX_DISCORD_DIR` / `--dir` root and each discoverable
+top-level workspace under it:
+
+```toml
+# /home/peezy/crypto-workspace/.codex/workspace.toml
+[[discord.gateway.surfaces]]
+key = "crypto"
+home_channel_id = "1503107617512919220"
+workspace_forum_channel_id = "1503107617512919221"
+task_threads_channel_id = "1503107617512919222"
+```
+
+Each surface owns its home channel, workspace forum, and task-thread channel.
+The workspace file does not list workspace paths; the file's containing
+workspace is the route. Workspaces without a Discord surface entry use the
+default `.env` surface. If multiple workspaces name the same surface key with
+the same channel ids, they are merged into one guild surface. Surface keys and
+channel ids must be unique, and each workspace file may contain at most one
+`[[discord.gateway.surfaces]]` entry.
+
 `CODEX_DISCORD_MAIN_THREAD_ID` is optional. If omitted, the bridge creates a new
 main operator thread, attaches the privileged gateway tools to it, and stores it
 in the bridge state file. Existing configured main threads are resumed as-is;
 recreate the main operator thread if you need to attach gateway tools to a
 thread that predates gateway mode.
 
-In the home channel:
+In each configured home channel:
 
 - normal messages are sent to the main operator thread
 - bot mentions are treated as gateway messages and do not create Discord task
   threads
 - `/status` replies directly with gateway state instead of starting a Codex turn
 - `/status` also lists active Codex threads, linking any opened Discord thread
-  and offering private buttons to open active threads that are not yet in Discord
+  on the same surface and offering private buttons to open active threads that
+  are not yet in Discord
 - `/goals` is available from workspace forum posts and opens an ephemeral goal
   management picker for that workspace
 - `/goals` inside an opened Codex Discord thread manages that specific thread's
@@ -78,17 +104,19 @@ gateway tools; only the main operator thread can manage delegation.
 
 ## Workbench Prototype
 
-The gateway can optionally maintain a noisy Discord workbench beside the home
-channel. Configure both channels to enable it:
+The gateway can optionally maintain a noisy Discord workbench beside each home
+channel. Configure both channels on the default `.env` surface, or on a
+workspace-owned `[[discord.gateway.surfaces]]` entry, to enable it:
 
 ```bash
 CODEX_DISCORD_WORKSPACE_FORUM_CHANNEL_ID=1502107617512919221
 CODEX_DISCORD_TASK_THREADS_CHANNEL_ID=1502107617512919222
 ```
 
-The home channel remains the compact operator chat. The workspace forum gets one
-post for each discoverable top-level folder under `CODEX_DISCORD_DIR`, which is
-the gateway's main workspace root. For the home-folder gateway, set
+The home channel remains the compact operator chat. Each surface's workspace
+forum gets one post for each discoverable top-level folder under
+`CODEX_DISCORD_DIR` that routes to that surface. `CODEX_DISCORD_DIR` is the
+gateway's main workspace root. For the home-folder gateway, set
 `CODEX_DISCORD_DIR=/home/peezy`; a delegated cwd such as
 `/home/peezy/codex-fork-workspace/codex-flows` maps to the
 `/home/peezy/codex-fork-workspace` workspace post. Hidden folders and
@@ -96,8 +124,9 @@ the gateway's main workspace root. For the home-folder gateway, set
 show Codex threads already opened into Discord. Run `/threads` in a workspace
 post to list all Codex threads for that workspace; the bridge replies with an
 ephemeral numbered button picker visible only to the command sender. Choosing a
-number opens or reuses one Discord task thread in the task thread channel, and
-messages in that Discord thread are routed directly to the opened Codex thread.
+number opens or reuses one Discord task thread in that surface's task thread
+channel, and messages in that Discord thread are routed directly to the opened
+Codex thread.
 
 When the workbench is enabled:
 
@@ -110,9 +139,10 @@ When the workbench is enabled:
 - `/threads` lists known Codex threads from `thread/list` plus tracked
   delegations that may not have appeared in the list yet
 - choosing an item from the ephemeral `/threads` picker creates or reuses one
-  Discord task thread in the task thread channel
-- `/status` shows all active Codex threads across workspaces and uses the same
-  ephemeral button flow to open active threads without Discord task threads
+  Discord task thread in that surface's task thread channel
+- `/status` shows active Codex threads for the current surface and uses the same
+  surface-scoped ephemeral button flow to open active threads without Discord
+  task threads
 - `/goals` in workspace forum posts lists recent workspace thread goals and lets
   the command sender mark existing goals active, paused, or complete, clear
   them, or open the thread into Discord
@@ -122,9 +152,9 @@ When the workbench is enabled:
 - repeated delegations in the same cwd reuse the same workspace post and update
   the workspace thread list
 - Stop lifecycle events update the workspace dashboard and any already-opened
-  task thread
-- the home channel receives only compact status/link messages for completed
-  delegations
+  task thread on the routed surface
+- the routed home channel receives only compact status/link messages for
+  completed delegations
 - main-thread injection and wake behavior still follow the delegation return
   mode
 

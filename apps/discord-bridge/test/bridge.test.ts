@@ -1443,6 +1443,256 @@ describe("DiscordCodexBridge", () => {
 		}
 	});
 
+	test("multi-guild gateway surfaces scope workspaces, status, hooks, and home delivery", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "discord-surfaces-"));
+		const hookSpoolDir = await testHookSpoolDir();
+		const alphaCwd = path.join(root, "alpha", "project");
+		const cryptoWorkspace = path.join(root, "crypto-workspace");
+		const cryptoCwd = path.join(cryptoWorkspace, "project");
+		await mkdir(alphaCwd, { recursive: true });
+		await mkdir(cryptoCwd, { recursive: true });
+		const client = new FakeCodexClient();
+		client.threads = [
+			testThread({
+				id: "codex-alpha-active",
+				cwd: alphaCwd,
+				name: "Alpha active",
+				status: { type: "active" } as v2.ThreadStatus,
+				updatedAt: 20,
+			}),
+			testThread({
+				id: "codex-crypto-active",
+				cwd: cryptoCwd,
+				name: "Crypto active",
+				status: { type: "active" } as v2.ThreadStatus,
+				updatedAt: 30,
+			}),
+		];
+		const transport = new FakeDiscordTransport();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				cwd: root,
+				gateway: {
+					homeChannelId: "home-default",
+					workspaceForumChannelId: "forum-default",
+					taskThreadsChannelId: "tasks-default",
+					surfaces: [
+						{
+							key: "default",
+							homeChannelId: "home-default",
+							workspaceForumChannelId: "forum-default",
+							taskThreadsChannelId: "tasks-default",
+						},
+						{
+							key: "crypto",
+							homeChannelId: "home-crypto",
+							workspaceForumChannelId: "forum-crypto",
+							taskThreadsChannelId: "tasks-crypto",
+							workspaceCwds: [cryptoWorkspace],
+						},
+					],
+				},
+				hookSpoolDir,
+			}),
+			now: () => new Date("2026-05-14T12:00:00.000Z"),
+		});
+
+		try {
+			await bridge.start();
+			expect(transport.createdForumPosts).toEqual([
+				expect.objectContaining({
+					channelId: "forum-default",
+					name: "alpha",
+					threadId: "forum-post-1",
+				}),
+				expect.objectContaining({
+					channelId: "forum-crypto",
+					name: "crypto-workspace",
+					threadId: "forum-post-2",
+				}),
+			]);
+			expect(bridge.stateForTest().gateway?.workspaces).toEqual([
+				expect.objectContaining({
+					cwd: path.join(root, "alpha"),
+					surfaceKey: "default",
+				}),
+				expect.objectContaining({
+					cwd: cryptoWorkspace,
+					surfaceKey: "crypto",
+				}),
+			]);
+			expect(transport.registeredCommands).toEqual([
+				{
+					channelIds: [
+						"parent-channel",
+						"home-default",
+						"forum-default",
+						"tasks-default",
+						"home-crypto",
+						"forum-crypto",
+						"tasks-crypto",
+					],
+				},
+			]);
+
+			transport.emit({
+				kind: "status",
+				channelId: "home-crypto",
+				author: { id: "user-1", name: "Peezy", isBot: false },
+				createdAt: "2026-05-14T12:00:30.000Z",
+				reply: async () => {},
+				replyPicker: transport.threadsReplyPicker(),
+			});
+			await waitFor(() => transport.ephemeralPickers.length === 1);
+			const statusPicker = transport.ephemeralPickers[0];
+			expect(statusPicker?.text).toContain("Surface: `crypto`");
+			expect(statusPicker?.text).toContain("1️⃣ `not opened` Crypto active (active)");
+			expect(statusPicker?.text).not.toContain("Alpha active");
+
+			transport.emitThreadPicker({
+				pickerId: statusPicker?.pickerId ?? "",
+				optionId: "0",
+			});
+			await waitFor(() => transport.createdThreads.length === 1);
+			expect(transport.createdThreads[0]).toEqual({
+				channelId: "tasks-crypto",
+				name: "crypto-workspace: Crypto active",
+				sourceMessageId: undefined,
+			});
+			expect(bridge.stateForTest().sessions).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						discordThreadId: "discord-thread-1",
+						parentChannelId: "tasks-crypto",
+						codexThreadId: "codex-crypto-active",
+						surfaceKey: "crypto",
+					}),
+				]),
+			);
+
+			await emitHookEvent(hookSpoolDir, {
+				eventName: "UserPromptSubmit",
+				sessionId: "codex-crypto-observed",
+				turnId: "turn-crypto-observed",
+				cwd: cryptoCwd,
+				prompt: "Watch the crypto workspace.",
+			});
+			await waitFor(() =>
+				bridge.stateForTest().gateway?.observedThreads?.some((thread) =>
+					thread.threadId === "codex-crypto-observed" &&
+					thread.surfaceKey === "crypto" &&
+					thread.status === "active"
+				) ?? false
+			);
+			expect(transport.updatedMessages.some((message) =>
+				message.channelId === "forum-post-2" &&
+				message.text.includes("Watch the crypto workspace.")
+			)).toBe(true);
+			expect(transport.updatedMessages.some((message) =>
+				message.channelId === "forum-post-1" &&
+				message.text.includes("Watch the crypto workspace.")
+			)).toBe(false);
+
+			transport.emit({
+				kind: "threads",
+				channelId: "forum-post-2",
+				author: { id: "user-1", name: "Peezy", isBot: false },
+				createdAt: "2026-05-14T12:00:45.000Z",
+				reply: async () => {},
+				replyPicker: transport.threadsReplyPicker(),
+			});
+			await waitFor(() => transport.ephemeralPickers.length === 2);
+			expect(transport.ephemeralPickers[1]?.text).toContain("Crypto active");
+			expect(transport.ephemeralPickers[1]?.text).toContain(
+				"Watch the crypto workspace.",
+			);
+			expect(transport.ephemeralPickers[1]?.text).not.toContain("Alpha active");
+
+			client.threadGoals.set("codex-crypto-active", {
+				threadId: "codex-crypto-active",
+				objective: "Manage crypto workspace goals",
+				status: "active",
+				tokenBudget: null,
+				tokensUsed: 0,
+				timeUsedSeconds: 0,
+				createdAt: 1,
+				updatedAt: 1,
+			});
+			transport.emit({
+				kind: "goals",
+				channelId: "forum-post-2",
+				author: { id: "user-1", name: "Peezy", isBot: false },
+				createdAt: "2026-05-14T12:00:50.000Z",
+				reply: async () => {},
+				replyPicker: transport.threadsReplyPicker(),
+			});
+			await waitFor(() => transport.ephemeralPickers.length === 3);
+			expect(transport.ephemeralPickers[2]?.text).toContain(
+				"Manage crypto workspace goals",
+			);
+			expect(transport.ephemeralPickers[2]?.text).not.toContain("Alpha active");
+
+			transport.emit({
+				kind: "message",
+				channelId: "home-crypto",
+				messageId: "home-crypto-message",
+				author: { id: "user-1", name: "Peezy", isBot: false },
+				content: "hello from crypto guild",
+				createdAt: "2026-05-14T12:01:00.000Z",
+			});
+			await waitFor(() => client.startTurnCalls.length === 1);
+			expect(inputText(client.startTurnCalls[0]?.input[0])).toContain(
+				"Surface: crypto",
+			);
+			expect(inputText(client.startTurnCalls[0]?.input[0])).toContain(
+				"Home channel: home-crypto",
+			);
+
+			client.emitNotification({
+				method: "item/completed",
+				params: {
+					threadId: "codex-thread-1",
+					turnId: "turn-1",
+					item: {
+						id: "message-crypto-final",
+						type: "agentMessage",
+						text: "Crypto gateway answer.",
+						phase: "final_answer",
+						memoryCitation: null,
+					},
+				},
+			});
+			client.emitNotification({
+				method: "turn/completed",
+				params: {
+					threadId: "codex-thread-1",
+					turn: {
+						id: "turn-1",
+						status: "completed",
+						items: [],
+					},
+				},
+			});
+			await waitFor(() =>
+				transport.messages.some((message) =>
+					message.channelId === "home-crypto" &&
+					message.text === "Crypto gateway answer."
+				)
+			);
+			expect(transport.messages.some((message) =>
+				message.channelId === "home-default" &&
+				message.text === "Crypto gateway answer."
+			)).toBe(false);
+		} finally {
+			await bridge.stop();
+			await rm(hookSpoolDir, { recursive: true, force: true });
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	test("goals command manages thread goals from workspace forum posts", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "discord-goals-"));
 		await mkdir(path.join(root, "alpha", "project"), { recursive: true });

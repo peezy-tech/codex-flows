@@ -1,3 +1,4 @@
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,6 +11,7 @@ import type {
 import type {
 	DiscordBridgeConfig,
 	DiscordConsoleOutputMode,
+	DiscordGatewaySurfaceConfig,
 	DiscordProgressMode,
 } from "./types.ts";
 import type { DiscordBridgeLogLevelSetting } from "./logger.ts";
@@ -65,6 +67,7 @@ const sandboxValues = new Set<v2.SandboxMode>([
 	"workspace-write",
 	"danger-full-access",
 ]);
+const defaultGatewaySurfaceKey = "default";
 
 export function parseConfig(argv: string[], env: NodeJS.ProcessEnv): ParsedConfig {
 	const args = parseFlags(argv);
@@ -112,6 +115,13 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv): ParsedConfi
 	const logLevel = optionalLogLevel(
 		stringFlag(args, "log-level") ?? env.CODEX_DISCORD_LOG_LEVEL,
 	) ?? (debug ? "debug" : undefined);
+	const cwd = resolveHomeDir(
+		stringFlag(args, "dir") ??
+			stringFlag(args, "positional-dir") ??
+			env.CODEX_DISCORD_DIR ??
+			stringFlag(args, "cwd") ??
+			env.CODEX_DISCORD_CWD,
+	);
 
 	return {
 		type: "run",
@@ -125,18 +135,12 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv): ParsedConfi
 					env.CODEX_DISCORD_ALLOWED_CHANNEL_IDS,
 			),
 			statePath,
-			gateway: gatewayConfig(args, env),
+			gateway: gatewayConfig(args, env, cwd),
 			flowBackendUrl:
 				stringFlag(args, "flow-backend-url") ??
 				env.CODEX_FLOW_BACKEND_URL ??
 				env.CODEX_GATEWAY_BACKEND_URL,
-			cwd: resolveHomeDir(
-				stringFlag(args, "dir") ??
-					stringFlag(args, "positional-dir") ??
-					env.CODEX_DISCORD_DIR ??
-					stringFlag(args, "cwd") ??
-					env.CODEX_DISCORD_CWD,
-			),
+			cwd,
 			model: stringFlag(args, "model") ?? env.CODEX_DISCORD_MODEL,
 			modelProvider:
 				stringFlag(args, "model-provider") ??
@@ -234,6 +238,16 @@ function csvSet(value: string | undefined): Set<string> {
 	);
 }
 
+function record(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object" && !Array.isArray(value)
+		? value as Record<string, unknown>
+		: {};
+}
+
+function optionalString(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function booleanFlag(flags: Map<string, string | boolean>, name: string): boolean {
 	const value = flags.get(name);
 	if (value === true) {
@@ -279,27 +293,40 @@ function optionalProgressMode(value: string | undefined): DiscordProgressMode | 
 function gatewayConfig(
 	flags: Map<string, string | boolean>,
 	env: NodeJS.ProcessEnv,
+	workspaceRoot: string | undefined,
 ): DiscordBridgeConfig["gateway"] {
-	const homeChannelId =
+	const workspaceSurfaces = gatewaySurfacesConfig(workspaceRoot);
+	const configuredHomeChannelId =
 		stringFlag(flags, "home-channel-id") ??
 		stringFlag(flags, "gateway-home-channel-id") ??
 		env.CODEX_DISCORD_HOME_CHANNEL_ID ??
 		env.CODEX_DISCORD_GATEWAY_HOME_CHANNEL_ID;
+	const useWorkspacePrimaryDefaults = !configuredHomeChannelId;
+	const homeChannelId = configuredHomeChannelId ??
+		workspaceSurfaces[0]?.homeChannelId;
 	const mainThreadId =
 		stringFlag(flags, "main-thread-id") ??
 		stringFlag(flags, "gateway-main-thread-id") ??
 		env.CODEX_DISCORD_MAIN_THREAD_ID ??
 		env.CODEX_DISCORD_GATEWAY_MAIN_THREAD_ID;
-	const workspaceForumChannelId =
+	const configuredWorkspaceForumChannelId =
 		stringFlag(flags, "workspace-forum-channel-id") ??
 		stringFlag(flags, "gateway-workspace-forum-channel-id") ??
 		env.CODEX_DISCORD_WORKSPACE_FORUM_CHANNEL_ID ??
 		env.CODEX_DISCORD_GATEWAY_WORKSPACE_FORUM_CHANNEL_ID;
-	const taskThreadsChannelId =
+	const workspaceForumChannelId = configuredWorkspaceForumChannelId ??
+		(useWorkspacePrimaryDefaults
+			? workspaceSurfaces[0]?.workspaceForumChannelId
+			: undefined);
+	const configuredTaskThreadsChannelId =
 		stringFlag(flags, "task-threads-channel-id") ??
 		stringFlag(flags, "gateway-task-threads-channel-id") ??
 		env.CODEX_DISCORD_TASK_THREADS_CHANNEL_ID ??
 		env.CODEX_DISCORD_GATEWAY_TASK_THREADS_CHANNEL_ID;
+	const taskThreadsChannelId = configuredTaskThreadsChannelId ??
+		(useWorkspacePrimaryDefaults
+			? workspaceSurfaces[0]?.taskThreadsChannelId
+			: undefined);
 	if (!homeChannelId) {
 		if (mainThreadId) {
 			throw new Error("Cannot set a gateway main thread without a gateway home channel.");
@@ -325,12 +352,244 @@ function gatewayConfig(
 			"Discord workbench channels must be separate from the gateway home channel and each other.",
 		);
 	}
+	const defaultSurface = {
+		key: defaultGatewaySurfaceKey,
+		homeChannelId,
+		workspaceForumChannelId,
+		taskThreadsChannelId,
+	};
+	const surfaces = workspaceSurfaces.length > 0
+		? mergeGatewaySurfaces(
+			configuredHomeChannelId
+				? [defaultSurface, ...workspaceSurfaces]
+				: workspaceSurfaces,
+		)
+		: [];
 	return {
 		homeChannelId,
 		mainThreadId,
 		workspaceForumChannelId,
 		taskThreadsChannelId,
+		surfaces: surfaces.length > 0 ? surfaces : undefined,
 	};
+}
+
+function gatewaySurfacesConfig(
+	workspaceRoot: string | undefined,
+): DiscordGatewaySurfaceConfig[] {
+	if (!workspaceRoot) {
+		return [];
+	}
+	const workspaceCwds = discoverWorkspaceConfigCwds(workspaceRoot);
+	if (workspaceCwds.length === 0) {
+		return [];
+	}
+	const surfaces: DiscordGatewaySurfaceConfig[] = [];
+	for (const workspaceCwd of workspaceCwds) {
+		const surface = workspaceGatewaySurfaceConfig(workspaceCwd);
+		if (surface) {
+			surfaces.push(surface);
+		}
+	}
+	return mergeGatewaySurfaces(surfaces);
+}
+
+function discoverWorkspaceConfigCwds(workspaceRoot: string): string[] {
+	const normalizedRoot = path.normalize(workspaceRoot);
+	const cwds = [normalizedRoot];
+	let entries;
+	try {
+		entries = readdirSync(normalizedRoot, { withFileTypes: true });
+	} catch {
+		return cwds;
+	}
+	for (const entry of entries) {
+		if (!isDiscoverableWorkspaceEntry(entry.name)) {
+			continue;
+		}
+		const fullPath = path.join(normalizedRoot, entry.name);
+		if (entry.isDirectory()) {
+			cwds.push(fullPath);
+			continue;
+		}
+		if (!entry.isSymbolicLink()) {
+			continue;
+		}
+		try {
+			if (statSync(fullPath).isDirectory()) {
+				cwds.push(fullPath);
+			}
+		} catch {
+			continue;
+		}
+	}
+	return uniqueStringList(cwds.map((cwd) => path.normalize(cwd))).sort(
+		(left, right) => left.localeCompare(right),
+	);
+}
+
+function isDiscoverableWorkspaceEntry(name: string): boolean {
+	return Boolean(name) &&
+		!name.startsWith(".") &&
+		name !== "node_modules";
+}
+
+function workspaceGatewaySurfaceConfig(
+	workspaceCwd: string,
+): DiscordGatewaySurfaceConfig | undefined {
+	const configPath = path.join(workspaceCwd, ".codex", "workspace.toml");
+	if (!existsSync(configPath)) {
+		return undefined;
+	}
+	let parsed: unknown;
+	try {
+		parsed = Bun.TOML.parse(readFileSync(configPath, "utf8"));
+	} catch (error) {
+		throw new Error(
+			`Invalid workspace config TOML at ${configPath}: ${errorMessage(error)}`,
+		);
+	}
+	const surfacesInput = gatewaySurfaceEntries(parsed);
+	if (surfacesInput === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(surfacesInput)) {
+		throw new Error(
+			`workspace.toml discord.gateway.surfaces must be an array: ${configPath}`,
+		);
+	}
+	if (surfacesInput.length === 0) {
+		return undefined;
+	}
+	if (surfacesInput.length > 1) {
+		throw new Error(
+			`workspace.toml discord.gateway.surfaces must contain one surface: ${configPath}`,
+		);
+	}
+	return parseGatewaySurface(surfacesInput[0], 0, workspaceCwd);
+}
+
+function gatewaySurfaceEntries(input: unknown): unknown {
+	const parsed = record(input);
+	if (parsed.discord === undefined) {
+		return undefined;
+	}
+	const discord = record(parsed.discord);
+	if (discord.gateway === undefined) {
+		return undefined;
+	}
+	const gateway = record(discord.gateway);
+	return gateway.surfaces;
+}
+
+function parseGatewaySurface(
+	input: unknown,
+	index: number,
+	workspaceCwd: string,
+): DiscordGatewaySurfaceConfig {
+	const parsed = record(input);
+	const key = optionalString(parsed.key) ?? optionalString(parsed.name);
+	const homeChannelId = optionalString(parsed.homeChannelId) ??
+		optionalString(parsed.home_channel_id);
+	const workspaceForumChannelId = optionalString(parsed.workspaceForumChannelId) ??
+		optionalString(parsed.workspace_forum_channel_id);
+	const taskThreadsChannelId = optionalString(parsed.taskThreadsChannelId) ??
+		optionalString(parsed.task_threads_channel_id);
+	if (!key) {
+		throw new Error(`Gateway surface at index ${index} is missing key.`);
+	}
+	if (!homeChannelId) {
+		throw new Error(`Gateway surface ${key} is missing homeChannelId.`);
+	}
+	if (Boolean(workspaceForumChannelId) !== Boolean(taskThreadsChannelId)) {
+		throw new Error(
+			`Gateway surface ${key} requires both workspaceForumChannelId and taskThreadsChannelId.`,
+		);
+	}
+	if (
+		workspaceForumChannelId &&
+		taskThreadsChannelId &&
+		(homeChannelId === workspaceForumChannelId ||
+			homeChannelId === taskThreadsChannelId ||
+			workspaceForumChannelId === taskThreadsChannelId)
+	) {
+		throw new Error(`Gateway surface ${key} channels must be distinct.`);
+	}
+	return {
+		key,
+		homeChannelId,
+		workspaceForumChannelId,
+		taskThreadsChannelId,
+		workspaceCwds: [path.normalize(workspaceCwd)],
+	};
+}
+
+function mergeGatewaySurfaces(
+	surfaces: DiscordGatewaySurfaceConfig[],
+): DiscordGatewaySurfaceConfig[] {
+	const byKey = new Map<string, DiscordGatewaySurfaceConfig>();
+	for (const surface of surfaces) {
+		const existing = byKey.get(surface.key);
+		if (!existing) {
+			byKey.set(surface.key, {
+				...surface,
+				workspaceCwds: surface.workspaceCwds
+					? uniqueStringList(surface.workspaceCwds.map((cwd) => path.normalize(cwd)))
+					: undefined,
+			});
+			continue;
+		}
+		if (
+			existing.homeChannelId !== surface.homeChannelId ||
+			existing.workspaceForumChannelId !== surface.workspaceForumChannelId ||
+			existing.taskThreadsChannelId !== surface.taskThreadsChannelId
+		) {
+			throw new Error(
+				`Gateway surface key ${surface.key} is configured with different channels.`,
+			);
+		}
+		existing.workspaceCwds = existing.workspaceCwds && surface.workspaceCwds
+			? uniqueStringList([
+				...existing.workspaceCwds,
+				...surface.workspaceCwds.map((cwd) => path.normalize(cwd)),
+			])
+			: undefined;
+	}
+	const merged = [...byKey.values()];
+	validateGatewaySurfaces(merged);
+	return merged;
+}
+
+function validateGatewaySurfaces(surfaces: DiscordGatewaySurfaceConfig[]): void {
+	const channelIds = new Set<string>();
+	let catchAllSurfaces = 0;
+	for (const surface of surfaces) {
+		if (!surface.workspaceCwds || surface.workspaceCwds.length === 0) {
+			catchAllSurfaces += 1;
+		}
+		for (const channelId of [
+			surface.homeChannelId,
+			surface.workspaceForumChannelId,
+			surface.taskThreadsChannelId,
+		]) {
+			if (!channelId) {
+				continue;
+			}
+			if (channelIds.has(channelId)) {
+				throw new Error(
+					`Gateway surface channel is configured more than once: ${channelId}`,
+				);
+			}
+			channelIds.add(channelId);
+		}
+	}
+	if (catchAllSurfaces > 1) {
+		throw new Error("Only one gateway surface may omit workspaceCwds.");
+	}
+}
+
+function uniqueStringList(values: string[]): string[] {
+	return [...new Set(values)];
 }
 
 function optionalConsoleOutput(
@@ -438,4 +697,8 @@ function resolveHomeDir(value: string | undefined): string | undefined {
 		return value;
 	}
 	return path.join(os.homedir(), value);
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }

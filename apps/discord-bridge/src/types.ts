@@ -38,6 +38,15 @@ export type DiscordGatewayConfig = {
 	mainThreadId?: string;
 	workspaceForumChannelId?: string;
 	taskThreadsChannelId?: string;
+	surfaces?: DiscordGatewaySurfaceConfig[];
+};
+
+export type DiscordGatewaySurfaceConfig = {
+	key: string;
+	homeChannelId: string;
+	workspaceForumChannelId?: string;
+	taskThreadsChannelId?: string;
+	workspaceCwds?: string[];
 };
 
 export type DiscordAuthor = {
@@ -265,6 +274,7 @@ export type DiscordGatewayDelegation = {
 	status: "active" | "idle" | "failed" | "complete" | "reported";
 	cwd?: string;
 	workspaceKey?: string;
+	surfaceKey?: string;
 	groupId?: string;
 	returnMode?: DiscordGatewayDelegationReturnMode;
 	discordDetailThreadId?: string;
@@ -285,6 +295,7 @@ export type DiscordGatewayDelegation = {
 
 export type DiscordGatewayWorkspaceSurface = {
 	key: string;
+	surfaceKey?: string;
 	cwd: string;
 	title: string;
 	discordThreadId: string;
@@ -350,6 +361,7 @@ export type DiscordGatewayObservedThread = {
 	status: DiscordGatewayObservedThreadStatus;
 	cwd?: string;
 	workspaceKey?: string;
+	surfaceKey?: string;
 	model?: string;
 	transcriptPath?: string;
 	lastTurnId?: string;
@@ -371,6 +383,7 @@ export type DiscordBridgeSession = {
 	discordThreadId: string;
 	parentChannelId: string;
 	guildId?: string;
+	surfaceKey?: string;
 	sourceMessageId?: string;
 	codexThreadId: string;
 	title: string;

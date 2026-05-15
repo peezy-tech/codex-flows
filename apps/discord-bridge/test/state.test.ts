@@ -28,6 +28,7 @@ describe("JsonFileStateStore", () => {
 								status: "active",
 								cwd: "/workspace/patchbay",
 								workspaceKey: "workspace-patchbay",
+								surfaceKey: "org-a",
 								discordDetailThreadId: "discord-detail-thread",
 								discordTaskThreadId: "discord-task-thread",
 								discordWorkspaceThreadId: "discord-workspace-thread",
@@ -40,6 +41,7 @@ describe("JsonFileStateStore", () => {
 						workspaces: [
 							{
 								key: "workspace-patchbay",
+								surfaceKey: "org-a",
 								cwd: "/workspace/patchbay",
 								title: "patchbay",
 								discordThreadId: "discord-workspace-thread",
@@ -56,6 +58,7 @@ describe("JsonFileStateStore", () => {
 								status: "waiting",
 								cwd: "/workspace/patchbay",
 								workspaceKey: "workspace-patchbay",
+								surfaceKey: "org-a",
 								model: "gpt-test",
 								transcriptPath: "/tmp/observed.jsonl",
 								lastTurnId: "turn-observed",
@@ -89,6 +92,7 @@ describe("JsonFileStateStore", () => {
 						{
 							discordThreadId: "discord-thread-1",
 							parentChannelId: "parent-channel",
+							surfaceKey: "org-a",
 							sourceMessageId: "message-start-1",
 							codexThreadId: "codex-thread-1",
 							title: "Granted thread",
@@ -147,6 +151,7 @@ describe("JsonFileStateStore", () => {
 						status: "active",
 						cwd: "/workspace/patchbay",
 						workspaceKey: "workspace-patchbay",
+						surfaceKey: "org-a",
 						discordDetailThreadId: "discord-detail-thread",
 						discordTaskThreadId: "discord-task-thread",
 						discordWorkspaceThreadId: "discord-workspace-thread",
@@ -159,6 +164,7 @@ describe("JsonFileStateStore", () => {
 				workspaces: [
 					{
 						key: "workspace-patchbay",
+						surfaceKey: "org-a",
 						cwd: "/workspace/patchbay",
 						title: "patchbay",
 						discordThreadId: "discord-workspace-thread",
@@ -175,6 +181,7 @@ describe("JsonFileStateStore", () => {
 						status: "waiting",
 						cwd: "/workspace/patchbay",
 						workspaceKey: "workspace-patchbay",
+						surfaceKey: "org-a",
 						model: "gpt-test",
 						transcriptPath: "/tmp/observed.jsonl",
 						lastTurnId: "turn-observed",
@@ -208,6 +215,7 @@ describe("JsonFileStateStore", () => {
 			expect(state.sessions).toHaveLength(2);
 			expect(state.sessions[0]?.ownerUserId).toBe("user-1");
 			expect(state.sessions[0]?.sourceMessageId).toBe("message-start-1");
+			expect(state.sessions[0]?.surfaceKey).toBe("org-a");
 			expect(state.sessions[0]?.participantUserIds).toEqual([
 				"user-2",
 				"user-3",

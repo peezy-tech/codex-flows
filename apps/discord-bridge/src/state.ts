@@ -187,6 +187,7 @@ function parseGatewayDelegation(value: unknown): DiscordGatewayDelegation {
 		status,
 		cwd: optionalString(value.cwd),
 		workspaceKey: optionalString(value.workspaceKey),
+		surfaceKey: optionalString(value.surfaceKey),
 		groupId: optionalString(value.groupId),
 		returnMode: parseReturnMode(value.returnMode),
 		discordDetailThreadId: optionalString(value.discordDetailThreadId),
@@ -212,6 +213,7 @@ function parseGatewayWorkspace(value: unknown): DiscordGatewayWorkspaceSurface {
 	}
 	return {
 		key: requiredString(value.key, "gateway.workspaces.key"),
+		surfaceKey: optionalString(value.surfaceKey),
 		cwd: requiredString(value.cwd, "gateway.workspaces.cwd"),
 		title: requiredString(value.title, "gateway.workspaces.title"),
 		discordThreadId: requiredString(
@@ -262,6 +264,7 @@ function parseGatewayObservedThread(value: unknown): DiscordGatewayObservedThrea
 		status: parseObservedThreadStatus(value.status),
 		cwd: optionalString(value.cwd),
 		workspaceKey: optionalString(value.workspaceKey),
+		surfaceKey: optionalString(value.surfaceKey),
 		model: optionalString(value.model),
 		transcriptPath: optionalString(value.transcriptPath),
 		lastTurnId: optionalString(value.lastTurnId),
@@ -339,6 +342,7 @@ function parseSession(value: unknown): DiscordBridgeSession {
 		discordThreadId: requiredString(value.discordThreadId, "session.discordThreadId"),
 		parentChannelId: requiredString(value.parentChannelId, "session.parentChannelId"),
 		guildId: optionalString(value.guildId),
+		surfaceKey: optionalString(value.surfaceKey),
 		sourceMessageId: optionalString(value.sourceMessageId),
 		codexThreadId: requiredString(value.codexThreadId, "session.codexThreadId"),
 		title: requiredString(value.title, "session.title"),

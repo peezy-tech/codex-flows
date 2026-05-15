@@ -1,3 +1,4 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -236,6 +237,149 @@ describe("parseConfig", () => {
 		}
 	});
 
+	test("parses workspace-owned gateway surfaces and keeps env defaults as fallback", () => {
+		const root = workspaceRoot();
+		writeWorkspaceToml(root, "crypto-workspace", `
+[[discord.gateway.surfaces]]
+key = "crypto"
+home_channel_id = "home-b"
+workspace_forum_channel_id = "forum-b"
+task_threads_channel_id = "tasks-b"
+`);
+		writeWorkspaceToml(root, "research-workspace", `
+[[discord.gateway.surfaces]]
+key = "crypto"
+home_channel_id = "home-b"
+workspace_forum_channel_id = "forum-b"
+task_threads_channel_id = "tasks-b"
+`);
+		try {
+			const parsed = parseConfig(
+				[
+					"--token",
+					"discord-token",
+					"--allowed-user-ids",
+					"user-1",
+					"--dir",
+					root,
+				],
+				{
+					CODEX_DISCORD_HOME_CHANNEL_ID: "home-a",
+					CODEX_DISCORD_WORKSPACE_FORUM_CHANNEL_ID: "forum-a",
+					CODEX_DISCORD_TASK_THREADS_CHANNEL_ID: "tasks-a",
+				},
+			);
+
+			expect(parsed.type).toBe("run");
+			if (parsed.type === "run") {
+				expect(parsed.config.gateway).toEqual({
+					homeChannelId: "home-a",
+					workspaceForumChannelId: "forum-a",
+					taskThreadsChannelId: "tasks-a",
+					surfaces: [
+						{
+							key: "default",
+							homeChannelId: "home-a",
+							workspaceForumChannelId: "forum-a",
+							taskThreadsChannelId: "tasks-a",
+							workspaceCwds: undefined,
+						},
+						{
+							key: "crypto",
+							homeChannelId: "home-b",
+							workspaceForumChannelId: "forum-b",
+							taskThreadsChannelId: "tasks-b",
+							workspaceCwds: [
+								path.join(root, "crypto-workspace"),
+								path.join(root, "research-workspace"),
+							],
+						},
+					],
+				});
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects ambiguous workspace-owned gateway surfaces", () => {
+		const multiple = workspaceRoot();
+		writeWorkspaceToml(multiple, "crypto-workspace", `
+[[discord.gateway.surfaces]]
+key = "default"
+home_channel_id = "home-a"
+
+[[discord.gateway.surfaces]]
+key = "other"
+home_channel_id = "home-b"
+`);
+		try {
+			expect(() => parseConfig(baseArgsForRoot(multiple), {})).toThrow(
+				"workspace.toml discord.gateway.surfaces must contain one surface",
+			);
+		} finally {
+			rmSync(multiple, { recursive: true, force: true });
+		}
+
+		const duplicate = workspaceRoot();
+		writeWorkspaceToml(duplicate, "crypto-workspace", `
+[[discord.gateway.surfaces]]
+key = "default"
+home_channel_id = "home-a"
+`);
+		writeWorkspaceToml(duplicate, "research-workspace", `
+[[discord.gateway.surfaces]]
+key = "default"
+home_channel_id = "home-b"
+`);
+		try {
+			expect(() => parseConfig(baseArgsForRoot(duplicate), {})).toThrow(
+				"Gateway surface key default is configured with different channels.",
+			);
+		} finally {
+			rmSync(duplicate, { recursive: true, force: true });
+		}
+
+		const channelCollision = workspaceRoot();
+		writeWorkspaceToml(channelCollision, "crypto-workspace", `
+[[discord.gateway.surfaces]]
+key = "crypto"
+home_channel_id = "home-a"
+`);
+		writeWorkspaceToml(channelCollision, "alpha-workspace", `
+[[discord.gateway.surfaces]]
+key = "alpha"
+home_channel_id = "home-a"
+`);
+		try {
+			expect(() => parseConfig(baseArgsForRoot(channelCollision), {})).toThrow(
+				"Gateway surface channel is configured more than once: home-a",
+			);
+		} finally {
+			rmSync(channelCollision, { recursive: true, force: true });
+		}
+	});
+
+	test("ignores workspace.toml without gateway surfaces", () => {
+		const root = workspaceRoot();
+		writeRootWorkspaceToml(root, `
+name = "home"
+
+[tools]
+enabled = true
+`);
+		try {
+			const parsed = parseConfig(baseArgsForRoot(root), {});
+
+			expect(parsed.type).toBe("run");
+			if (parsed.type === "run") {
+				expect(parsed.config.gateway).toBeUndefined();
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	test("rejects gateway main thread without home channel", () => {
 		expect(() =>
 			parseConfig(
@@ -330,3 +474,31 @@ describe("parseConfig", () => {
 		).toThrow("Cannot set both --local-app-server and --app-server-url.");
 	});
 });
+
+function workspaceRoot(): string {
+	return mkdtempSync(path.join(os.tmpdir(), "discord-workspace-config-"));
+}
+
+function writeRootWorkspaceToml(root: string, toml: string): void {
+	const codexDir = path.join(root, ".codex");
+	mkdirSync(codexDir, { recursive: true });
+	writeFileSync(path.join(codexDir, "workspace.toml"), toml);
+}
+
+function writeWorkspaceToml(root: string, workspaceName: string, toml: string): void {
+	const workspaceDir = path.join(root, workspaceName);
+	const codexDir = path.join(workspaceDir, ".codex");
+	mkdirSync(codexDir, { recursive: true });
+	writeFileSync(path.join(codexDir, "workspace.toml"), toml);
+}
+
+function baseArgsForRoot(root: string): string[] {
+	return [
+		"--token",
+		"discord-token",
+		"--allowed-user-ids",
+		"user-1",
+		"--dir",
+		root,
+	];
+}

@@ -153,7 +153,7 @@ export class DiscordThreadRunner {
 			id: `${message.messageId}-${Date.now()}`,
 			status: "pending",
 			discordMessageId: message.messageId,
-			discordThreadId: this.session.discordThreadId,
+			discordThreadId: message.channelId,
 			codexThreadId: this.session.codexThreadId,
 			authorId: message.author.id,
 			authorName: message.author.name,
@@ -198,7 +198,7 @@ export class DiscordThreadRunner {
 						id: `${message.messageId}-steer`,
 						status: "pending",
 						discordMessageId: message.messageId,
-						discordThreadId: this.session.discordThreadId,
+						discordThreadId: message.channelId,
 						codexThreadId: this.session.codexThreadId,
 						authorId: message.author.id,
 						authorName: message.author.name,
@@ -273,6 +273,7 @@ export class DiscordThreadRunner {
 				origin: "discord",
 				queueItemId: item.id,
 				startedAt: turnStartedAt(turn),
+				discordThreadId: item.discordThreadId,
 			});
 			await this.#startTypingHeartbeat(active);
 			this.#scheduleActiveTurnReconcile(active);
@@ -386,6 +387,7 @@ export class DiscordThreadRunner {
 				origin: "discord",
 				queueItemId: item.id,
 				startedAt: turnStartedAt(started.turn),
+				discordThreadId: item.discordThreadId,
 			});
 			await this.#startTypingHeartbeat(active);
 			this.#scheduleActiveTurnReconcile(active);
@@ -595,6 +597,7 @@ export class DiscordThreadRunner {
 			origin: item ? "discord" : "external",
 			queueItemId: item?.id,
 			startedAt: turnStartedAt(turn),
+			discordThreadId: item?.discordThreadId,
 		});
 		if (!this.#finalAssistantText.has(turnKey(active.codexThreadId, active.turnId))) {
 			this.#finalAssistantText.set(turnKey(active.codexThreadId, active.turnId), "");
@@ -996,7 +999,8 @@ export class DiscordThreadRunner {
 				this.#state().deliveries
 					.filter(
 						(delivery) =>
-							delivery.discordThreadId === this.session.discordThreadId &&
+							(this.session.mode === "gateway" ||
+								delivery.discordThreadId === this.session.discordThreadId) &&
 							delivery.codexThreadId === this.session.codexThreadId &&
 							delivery.kind === "final" &&
 							Boolean(delivery.turnId),
@@ -1043,6 +1047,7 @@ export class DiscordThreadRunner {
 						origin: "discord",
 						queueItemId: item.id,
 						startedAt: turnStartedAt(completedTurn),
+						discordThreadId: item.discordThreadId,
 					})
 				: this.#upsertActiveTurn({
 						turnId,
@@ -1129,6 +1134,7 @@ export class DiscordThreadRunner {
 					turnId: activeOrItem.turnId ?? "unknown",
 					origin: "discord",
 					queueItemId: activeOrItem.id,
+					discordThreadId: activeOrItem.discordThreadId,
 				});
 		const item = this.#processingItemForTurn(active.turnId);
 		await this.#deliverError(active, `Codex turn ${status}.`);
@@ -1559,7 +1565,8 @@ export class DiscordThreadRunner {
 	#hasDelivery(turnId: string, kind: DiscordBridgeDelivery["kind"]): boolean {
 		return this.#state().deliveries.some(
 			(delivery) =>
-				delivery.discordThreadId === this.session.discordThreadId &&
+				(this.session.mode === "gateway" ||
+					delivery.discordThreadId === this.session.discordThreadId) &&
 				delivery.codexThreadId === this.session.codexThreadId &&
 				delivery.turnId === turnId &&
 				delivery.kind === kind,
@@ -1596,7 +1603,8 @@ export class DiscordThreadRunner {
 	#sessionActiveTurns(): DiscordBridgeActiveTurn[] {
 		return this.#state().activeTurns.filter(
 			(active) =>
-				active.discordThreadId === this.session.discordThreadId &&
+				(this.session.mode === "gateway" ||
+					active.discordThreadId === this.session.discordThreadId) &&
 				active.codexThreadId === this.session.codexThreadId,
 		);
 	}
@@ -1606,12 +1614,14 @@ export class DiscordThreadRunner {
 		origin: DiscordBridgeActiveTurn["origin"];
 		queueItemId?: string;
 		startedAt?: string;
+		discordThreadId?: string;
 	}): DiscordBridgeActiveTurn {
 		const state = this.#state();
 		const observedAt = this.#context.now().toISOString();
 		state.activeTurns = state.activeTurns.filter(
 			(active) =>
-				active.discordThreadId !== this.session.discordThreadId ||
+				(this.session.mode !== "gateway" &&
+					active.discordThreadId !== this.session.discordThreadId) ||
 				active.codexThreadId !== this.session.codexThreadId ||
 				active.turnId === input.turnId,
 		);
@@ -1620,12 +1630,13 @@ export class DiscordThreadRunner {
 			existing.origin = input.origin === "discord" ? "discord" : existing.origin;
 			existing.queueItemId = input.queueItemId ?? existing.queueItemId;
 			existing.startedAt = input.startedAt ?? existing.startedAt;
+			existing.discordThreadId = input.discordThreadId ?? existing.discordThreadId;
 			existing.observedAt = observedAt;
 			return existing;
 		}
 		const active: DiscordBridgeActiveTurn = {
 			turnId: input.turnId,
-			discordThreadId: this.session.discordThreadId,
+			discordThreadId: input.discordThreadId ?? this.session.discordThreadId,
 			codexThreadId: this.session.codexThreadId,
 			origin: input.origin,
 			queueItemId: input.queueItemId,
@@ -1640,7 +1651,8 @@ export class DiscordThreadRunner {
 		const state = this.#state();
 		state.activeTurns = state.activeTurns.filter(
 			(active) =>
-				active.discordThreadId !== this.session.discordThreadId ||
+				(this.session.mode !== "gateway" &&
+					active.discordThreadId !== this.session.discordThreadId) ||
 				active.codexThreadId !== this.session.codexThreadId ||
 				active.turnId !== turnId,
 		);
@@ -1665,7 +1677,8 @@ export class DiscordThreadRunner {
 	#sessionQueueItems(): DiscordBridgeQueueItem[] {
 		return this.#state().queue.filter(
 			(item) =>
-				item.discordThreadId === this.session.discordThreadId &&
+				(this.session.mode === "gateway" ||
+					item.discordThreadId === this.session.discordThreadId) &&
 				item.codexThreadId === this.session.codexThreadId,
 		);
 	}
@@ -1684,7 +1697,7 @@ export class DiscordThreadRunner {
 	}
 
 	#formatPrompt(item: DiscordBridgeQueueItem): string {
-		return formatDiscordPrompt(item, this.session);
+		return formatDiscordPrompt(item, this.session, this.#context.config);
 	}
 
 	#emitConsoleMessage(
@@ -2064,20 +2077,25 @@ function truncateOneLine(value: string, maxLength: number): string {
 function formatDiscordPrompt(
 	item: DiscordBridgeQueueItem,
 	session: DiscordBridgeSession,
+	config: DiscordBridgeConfig,
 ): string {
 	if (session.mode === "gateway") {
+		const surface = config.gateway?.surfaces?.find((candidate) =>
+			candidate.homeChannelId === item.discordThreadId
+		);
 		return [
 			"[discord-gateway]",
-			"Role: You are the main Codex operator thread for a single Discord home channel.",
+			"Role: You are the main Codex operator thread for a configured Discord gateway surface.",
 			"Intent: Treat this as a gateway request. Answer directly when appropriate; otherwise reason about backend/runtime delegation without assuming Discord itself owns a workspace registry.",
 			"Canonical memory: This main Codex thread is the operator memory. Delegated Codex threads remain canonical history for delegated work.",
+			surface ? `Surface: ${surface.key}` : undefined,
 			`Author: ${item.authorName} (${item.authorId})`,
 			`Message: ${item.discordMessageId}`,
 			`Home channel: ${item.discordThreadId}`,
 			`Gateway cwd: ${session.cwd ?? "default"}`,
 			"",
 			item.content,
-		].join("\n");
+		].filter((line): line is string => line !== undefined).join("\n");
 	}
 	return [
 		"[discord]",
