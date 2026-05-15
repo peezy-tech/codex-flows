@@ -17,6 +17,7 @@
 	},
 	"dependencies": {
 		"@peezy.tech/codex-flows": "workspace:*",
+		"@peezy.tech/flow-runtime": "workspace:*",
 		"discord.js": "catalog:"
 	},
 	"devDependencies": {

@@ -28,6 +28,7 @@
       },
       "dependencies": {
         "@peezy.tech/codex-flows": "workspace:*",
+        "@peezy.tech/flow-runtime": "workspace:*",
         "discord.js": "catalog:",
       },
       "devDependencies": {
@@ -119,7 +120,7 @@
       "name": "@peezy.tech/flow-runtime",
       "version": "0.3.0",
       "dependencies": {
-        "@peezy.tech/codex-flows": "workspace:*",
+        "@peezy.tech/codex-flows": "^0.3.0",
       },
       "devDependencies": {
         "@types/bun": "catalog:",

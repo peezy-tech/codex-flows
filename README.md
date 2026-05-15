@@ -154,6 +154,7 @@ The low-level app-server client package. It exports:
 - `@peezy.tech/codex-flows`: Node/Bun entry with stdio and WebSocket transports.
 - `@peezy.tech/codex-flows/browser`: browser entry with WebSocket transport only.
 - `@peezy.tech/codex-flows/flows`: framework-agnostic helpers for app servers that want to start Codex-backed workflows.
+- `@peezy.tech/codex-flows/workbench`: transport-neutral thread UX state reducers and app-server request descriptors.
 - `@peezy.tech/codex-flows/rpc`: JSON-RPC helpers and types.
 - `@peezy.tech/codex-flows/generated`: generated Codex app-server protocol types.
 
@@ -180,7 +181,20 @@ service, with optional transient `systemd-run` units per step.
 
 Shared runtime package for loading `flow.toml`, validating payload JSON Schema,
 matching steps to generic events, and invoking Bun or feature-flagged Code Mode
-steps.
+steps. It also exports `@peezy.tech/flow-runtime/backend-client` for
+backend-native flow event/run inspection and control over HTTP. That client
+normalizes backend-owned run state such as process status, semantic
+`FLOW_RESULT` status, attempts, output, replay, cancel, and attention flags.
+
+### Boundary
+
+App-server thread commands stay app-server-native: consumers should call
+`client.request(method, params)` or the generated protocol methods directly.
+Workbench helpers derive UI state and return `{ method, params }` descriptors;
+they do not execute app-server calls. Flow backend clients operate on generic
+`FlowEvent`, runs, attempts, output, replay, and cancel state. Domain completion
+such as pet-game asset registration, payment updates, or minting remains in the
+installing app's worker or Convex wrappers.
 
 ### `@peezy.tech/flow-backend-convex`
 

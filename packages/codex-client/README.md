@@ -23,6 +23,11 @@ This package owns the low-level JSON-RPC client, transports, framework-agnostic 
   - `CodexAuthClient`
   - `createCodexAuthClient`
   - privacy-preserving Codex account login, status, and usage helpers
+- `@peezy.tech/codex-flows/workbench`
+  - transport-neutral thread snapshots for UX surfaces
+  - reducers for app-server notifications and completed turns
+  - progress delivery state for summary, commentary, and final messages
+  - app-server request descriptors such as `{ method, params }`
 - `@peezy.tech/codex-flows/rpc`
 	- JSON-RPC message types and parsing helpers
 - `@peezy.tech/codex-flows/generated`
@@ -107,6 +112,37 @@ The high-level auth state intentionally omits email addresses and stable account
 identifiers. It exposes anonymous auth mode, plan, and usage data by default.
 Call the lower-level app-server client directly only when an application has an
 explicit reason to handle raw account details.
+
+## Workbench Boundary
+
+`@peezy.tech/codex-flows/workbench` is not an app-server SDK. It does not execute
+requests and does not wrap thread commands with methods such as `setGoal`,
+`readThread`, or `startTurn`. It only derives reusable UX state from app-server
+notifications and completed turns:
+
+- active turn status
+- goal summaries
+- plan steps and plan text
+- running commands
+- recent activity
+- summary/commentary/final progress delivery state
+
+For app-server-native actions, workbench helpers return descriptors:
+
+```ts
+import { threadGoalSetDescriptor } from "@peezy.tech/codex-flows/workbench";
+
+const action = threadGoalSetDescriptor({
+	threadId,
+	objective: "Finish the release checks.",
+	status: "active",
+	tokenBudget: 8000,
+});
+
+await client.request(action.method, action.params);
+```
+
+The app-server protocol remains the source of truth for thread commands.
 
 ## Scripts
 

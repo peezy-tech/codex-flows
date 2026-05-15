@@ -28,6 +28,10 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./backend-client": {
+			"types": "./dist/backend-client.d.ts",
+			"import": "./dist/backend-client.js"
 		}
 	},
 	"scripts": {

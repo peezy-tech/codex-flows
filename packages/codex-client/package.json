@@ -41,6 +41,10 @@
 			"types": "./dist/auth.d.ts",
 			"import": "./dist/auth.js"
 		},
+		"./workbench": {
+			"types": "./dist/workbench.d.ts",
+			"import": "./dist/workbench.js"
+		},
 		"./rpc": {
 			"types": "./dist/app-server/rpc.d.ts",
 			"import": "./dist/app-server/rpc.js"

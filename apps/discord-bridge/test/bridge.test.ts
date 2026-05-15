@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { JsonRpcNotification, JsonRpcRequest } from "@peezy.tech/codex-flows/rpc";
 import type { v2 } from "@peezy.tech/codex-flows/generated";
+import type { FlowBackendClient } from "@peezy.tech/flow-runtime/backend-client";
 
 import { DiscordCodexBridge, parseThreadStartIntent } from "../src/bridge.ts";
 import type {
@@ -192,6 +193,79 @@ describe("DiscordCodexBridge", () => {
 				}),
 			}),
 		);
+		await bridge.stop();
+	});
+
+	test("gateway flow inspection uses backend client and preserves tool payload shape", async () => {
+		const client = new FakeCodexClient();
+		const transport = new FakeDiscordTransport();
+		const flowBackendClient = new FakeFlowBackendClient();
+		const bridge = new DiscordCodexBridge({
+			client,
+			transport,
+			store: new MemoryStateStore(),
+			config: testConfig({
+				gateway: { homeChannelId: "home-channel" },
+			}),
+			flowBackendClient,
+		});
+
+		await bridge.start();
+		await waitFor(() => bridge.stateForTest().sessions.length === 1);
+		client.emitRequest({
+			id: "tool-runs",
+			method: "item/tool/call",
+			params: {
+				threadId: "codex-thread-1",
+				namespace: "codex_gateway",
+				tool: "list_flow_runs",
+				arguments: {
+					eventId: "event-1",
+					status: "completed",
+					limit: "5",
+				},
+			},
+		});
+		client.emitRequest({
+			id: "tool-events",
+			method: "item/tool/call",
+			params: {
+				threadId: "codex-thread-1",
+				namespace: "codex_gateway",
+				tool: "list_flow_events",
+				arguments: {
+					type: "upstream.release",
+					limit: "3",
+				},
+			},
+		});
+
+		await waitFor(() => client.responses.length === 2);
+		expect(flowBackendClient.listRunsCalls).toEqual([
+			{ eventId: "event-1", status: "completed", limit: 5 },
+		]);
+		expect(flowBackendClient.listEventsCalls).toEqual([
+			{ type: "upstream.release", limit: 3 },
+		]);
+		expect(gatewayToolResult(client.responses[0]?.result)).toEqual({
+			eventId: "event-1",
+			runs: [
+				expect.objectContaining({
+					id: "run-1",
+					status: "blocked",
+					effectiveStatus: "blocked",
+					needsAttention: true,
+				}),
+			],
+		});
+		expect(gatewayToolResult(client.responses[1]?.result)).toEqual({
+			events: [
+				expect.objectContaining({
+					id: "event-1",
+					type: "upstream.release",
+				}),
+			],
+		});
 		await bridge.stop();
 	});
 
@@ -4401,6 +4475,73 @@ function testThread(input: {
 		name: input.name ?? null,
 		turns: [],
 	} as v2.Thread;
+}
+
+class FakeFlowBackendClient implements FlowBackendClient {
+	listRunsCalls: Array<{ eventId?: string; status?: string; limit?: number }> = [];
+	listEventsCalls: Array<{ type?: string; limit?: number }> = [];
+
+	async listRuns(options: { eventId?: string; status?: string; limit?: number } = {}) {
+		this.listRunsCalls.push(options);
+		return {
+			eventId: options.eventId,
+			runs: [
+				{
+					id: "run-1",
+					eventId: options.eventId,
+					flowName: "openai-codex-bindings",
+					stepName: "regenerate-bindings",
+					processStatus: "completed",
+					resultStatus: "blocked" as const,
+					status: "blocked",
+					effectiveStatus: "blocked",
+					needsAttention: true,
+					attemptCount: 1,
+					attempts: [],
+					output: [],
+					raw: {},
+				},
+			],
+			raw: {},
+		};
+	}
+
+	async getRun(): Promise<never> {
+		throw new Error("getRun should not be called by Discord flow inspection");
+	}
+
+	async listEvents(options: { type?: string; limit?: number } = {}) {
+		this.listEventsCalls.push(options);
+		return {
+			events: [
+				{
+					id: "event-1",
+					type: options.type,
+					receivedAt: "2026-05-15T00:00:00.000Z",
+					runIds: ["run-1"],
+					runs: [],
+					raw: {},
+				},
+			],
+			raw: {},
+		};
+	}
+
+	async getEvent(): Promise<never> {
+		throw new Error("getEvent should not be called by Discord flow inspection");
+	}
+
+	async dispatchEvent(): Promise<never> {
+		throw new Error("dispatchEvent should not be exposed through Discord in this increment");
+	}
+
+	async replayEvent(): Promise<never> {
+		throw new Error("replayEvent should not be exposed through Discord in this increment");
+	}
+
+	async cancelRun(): Promise<never> {
+		throw new Error("cancelRun should not be exposed through Discord in this increment");
+	}
 }
 
 class FakeCodexClient implements CodexBridgeClient {

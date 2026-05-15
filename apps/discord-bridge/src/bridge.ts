@@ -7,6 +7,10 @@ import { createHash, randomUUID } from "node:crypto";
 import type { JsonRpcNotification, JsonRpcRequest } from "@peezy.tech/codex-flows/rpc";
 import type { JsonValue } from "@peezy.tech/codex-flows/generated/serde_json/JsonValue";
 import type { v2 } from "@peezy.tech/codex-flows/generated";
+import {
+	createFlowBackendHttpClient,
+	type FlowBackendClient,
+} from "@peezy.tech/flow-runtime/backend-client";
 
 import type { DiscordConsoleOutput } from "./console-output.ts";
 import { DiscordThreadRunner, MessageDeduplicator } from "./runner.ts";
@@ -133,6 +137,7 @@ export class DiscordCodexBridge {
 	#gatewayStopHookWatcher: FSWatcher | undefined;
 	#gatewayStopHookDrainTimer: Timer | undefined;
 	#gatewayStopHookDrainChain: Promise<void> = Promise.resolve();
+	#flowBackendClient: FlowBackendClient | undefined;
 	#transportStarted = false;
 	#threadPickersByMessage = new Map<string, WorkspaceThreadPicker>();
 	#threadPickersById = new Map<string, WorkspaceThreadPicker>();
@@ -147,6 +152,7 @@ export class DiscordCodexBridge {
 		now?: () => Date;
 		logger?: DiscordBridgeLogger;
 		consoleOutput?: DiscordConsoleOutput;
+		flowBackendClient?: FlowBackendClient;
 	}) {
 		this.client = options.client;
 		this.transport = options.transport;
@@ -161,6 +167,7 @@ export class DiscordCodexBridge {
 				now: this.#now,
 			});
 		this.#consoleOutput = options.consoleOutput;
+		this.#flowBackendClient = options.flowBackendClient;
 	}
 
 	async start(): Promise<void> {
@@ -1280,10 +1287,10 @@ export class DiscordCodexBridge {
 			};
 		}
 		if (tool === "list_flow_runs") {
-			return await this.#flowBackendGet("/runs", args);
+			return await this.#listFlowRuns(args);
 		}
 		if (tool === "list_flow_events") {
-			return await this.#flowBackendGet("/events", args);
+			return await this.#listFlowEvents(args);
 		}
 		throw new Error(`Unknown gateway tool: ${tool}`);
 	}
@@ -3125,25 +3132,38 @@ export class DiscordCodexBridge {
 		return true;
 	}
 
-	async #flowBackendGet(
-		pathname: string,
-		args: Record<string, unknown>,
-	): Promise<unknown> {
+	async #listFlowRuns(args: Record<string, unknown>): Promise<unknown> {
+		const result = await this.#requireFlowBackendClient().listRuns({
+			eventId: stringValue(args.eventId),
+			status: stringValue(args.status),
+			limit: positiveIntegerValue(args.limit),
+		});
+		return {
+			...(result.eventId ? { eventId: result.eventId } : {}),
+			runs: result.runs,
+		};
+	}
+
+	async #listFlowEvents(args: Record<string, unknown>): Promise<unknown> {
+		const result = await this.#requireFlowBackendClient().listEvents({
+			type: stringValue(args.type),
+			limit: positiveIntegerValue(args.limit),
+		});
+		return {
+			events: result.events,
+		};
+	}
+
+	#requireFlowBackendClient(): FlowBackendClient {
+		if (this.#flowBackendClient) {
+			return this.#flowBackendClient;
+		}
 		const baseUrl = this.config.flowBackendUrl;
 		if (!baseUrl) {
 			throw new Error("No flow backend URL configured.");
 		}
-		const url = new URL(pathname, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
-		for (const [key, value] of Object.entries(args)) {
-			if (value !== undefined && value !== null) {
-				url.searchParams.set(key, String(value));
-			}
-		}
-		const response = await fetch(url);
-		if (!response.ok) {
-			throw new Error(`Flow backend ${url.pathname} failed with ${response.status}`);
-		}
-		return await response.json();
+		this.#flowBackendClient = createFlowBackendHttpClient({ baseUrl });
+		return this.#flowBackendClient;
 	}
 
 	#upsertDelegation(input: DiscordGatewayDelegation): DiscordGatewayDelegation {
@@ -4228,6 +4248,17 @@ function record(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function positiveIntegerValue(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+		return Math.trunc(value);
+	}
+	if (typeof value !== "string" || !value.trim()) {
+		return undefined;
+	}
+	const parsed = Number.parseInt(value, 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function compactId(value: string): string {

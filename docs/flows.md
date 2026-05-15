@@ -182,6 +182,30 @@ Do not fabricate an upstream Codex release lifecycle test. Until the next real
 `openai/codex` release, use health checks, non-release smoke events, and stored
 event inspection/replay tooling only.
 
+## Backend Client
+
+Reusable consumers should use
+`@peezy.tech/flow-runtime/backend-client` for backend-native run and event
+inspection/control. The HTTP client speaks the `/runs`, `/runs/:id`,
+`/events`, `/events/:id`, `/events/:id/replay`, and `/runs/:id/cancel` style
+surface used by the local backend and compatible app-owned adapters.
+
+The client normalizes backend responses into view models with:
+
+- process status from the backend run record
+- semantic `FLOW_RESULT` status from `resultJson` or `result`
+- `effectiveStatus` and `needsAttention` for `blocked` and
+  `needs_intervention`
+- attempt count and attempt records
+- output chunks or stdout/stderr-derived output
+- latest output and result payload
+
+This is intentionally a flow-backend API, not an app-server wrapper. App-server
+thread controls stay as direct app-server protocol requests, and application
+completion logic stays outside generic backends. For example, a pet-game worker
+may upload generated assets, update payment state, and mint before completing a
+generic flow run.
+
 ## Convex Backend Direction
 
 Convex should be a durable orchestration backend, not the place where long
