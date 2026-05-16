@@ -5,7 +5,7 @@ description = "Rebase the Peezy Codex fork patch stack onto a canonical openai/c
 [config]
 package_name = "@peezy.tech/codex"
 codex_repo_env = "PEEZY_CODEX_REPO"
-codex_repo = "/home/peezy/codex-fork-workspace/codex"
+codex_repo = "/home/peezy/meta-workspace/codex"
 target_branch_env = "PEEZY_CODEX_TARGET_BRANCH"
 target_branch = "code-mode-exec-hooks"
 upstream_remote = "upstream"

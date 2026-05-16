@@ -1,0 +1,732 @@
+#!/usr/bin/env bun
+import {
+	CodexAppServerClient,
+	CodexWebSocketTransport,
+} from "../index.ts";
+import {
+	APP_SERVER_CALL_METHOD,
+	WORKSPACE_BACKEND_INITIALIZE_METHOD,
+	type WorkspaceBackendInitializeResponse,
+} from "../workspace-backend/index.ts";
+import {
+	COMMON_APP_SERVER_ACTIONS,
+	COMMON_WORKSPACE_BACKEND_METHODS,
+} from "./actions.ts";
+import {
+	DEFAULT_APP_SERVER_WS_URL,
+	DEFAULT_WORKSPACE_BACKEND_WS_URL,
+	parseArgs,
+	type ParsedCli,
+} from "./args.ts";
+import {
+	collectFetchInfo,
+	formatFetchInfo,
+	type FetchBackendInfo,
+	type FetchCountInfo,
+	type FetchFlowInfo,
+	type FetchFlowRunCounts,
+	type FetchThreadSummary,
+	type FetchThreadsInfo,
+} from "./fetch.ts";
+
+await main().catch((error) => {
+	process.stderr.write(`${errorMessage(error)}\n`);
+	process.exitCode = 1;
+});
+
+async function main(): Promise<void> {
+	const parsed = parseArgs(Bun.argv.slice(2), process.env);
+	if (parsed.type === "help") {
+		write(helpText());
+		return;
+	}
+	if (parsed.type === "fetch") {
+		const info = await collectFetchInfo({
+			appUrl: parsed.appUrl,
+			workspaceUrl: parsed.workspaceUrl,
+			backend: await collectBackendInfo(parsed),
+		});
+		write(parsed.json
+			? `${JSON.stringify(info, null, 2)}\n`
+			: formatFetchInfo(info, { color: parsed.color }));
+		return;
+	}
+	if (parsed.type === "app-actions") {
+		write(`${COMMON_APP_SERVER_ACTIONS.join("\n")}\n`);
+		return;
+	}
+	if (parsed.type === "app-call") {
+		writeJson(
+			await callAppServer(parsed.method, await readParams(parsed.paramsText), {
+				url: parsed.url,
+				timeoutMs: parsed.timeoutMs,
+			}),
+			parsed.pretty,
+		);
+		return;
+	}
+	if (parsed.type === "workspace-methods") {
+		const initialized = await initializeWorkspaceBackend(parsed);
+		writeJson({
+			advertised: initialized.capabilities.workspaceMethods,
+			common: COMMON_WORKSPACE_BACKEND_METHODS,
+		}, parsed.pretty);
+		return;
+	}
+	if (parsed.type === "workspace-call") {
+		writeJson(
+			await callWorkspaceBackend(
+				parsed.method,
+				await readParams(parsed.paramsText),
+				parsed,
+			),
+			parsed.pretty,
+		);
+		return;
+	}
+	if (parsed.type === "workspace-app-call") {
+		writeJson(
+			await callWorkspaceBackend(
+				APP_SERVER_CALL_METHOD,
+				{
+					method: parsed.method,
+					params: await readParams(parsed.paramsText),
+				},
+				parsed,
+			),
+			parsed.pretty,
+		);
+		return;
+	}
+	if (parsed.type === "flow-dispatch") {
+		const event = JSON.parse(await Bun.file(parsed.eventPath).text()) as unknown;
+		writeJson(await callWorkspaceBackend("flow.dispatch", { event }, parsed), parsed.pretty);
+		return;
+	}
+	if (parsed.type === "flow-list-events") {
+		writeJson(
+			await callWorkspaceBackend(
+				"flow.listEvents",
+				{ type: parsed.eventType, limit: parsed.limit },
+				parsed,
+			),
+			parsed.pretty,
+		);
+		return;
+	}
+	if (parsed.type === "flow-get-event") {
+		writeJson(
+			await callWorkspaceBackend("flow.getEvent", { eventId: parsed.eventId }, parsed),
+			parsed.pretty,
+		);
+		return;
+	}
+	if (parsed.type === "flow-replay") {
+		writeJson(
+			await callWorkspaceBackend(
+				"flow.replay",
+				{ eventId: parsed.eventId, wait: parsed.wait },
+				parsed,
+			),
+			parsed.pretty,
+		);
+		return;
+	}
+	if (parsed.type === "flow-list-runs") {
+		writeJson(
+			await callWorkspaceBackend(
+				"flow.listRuns",
+				{
+					eventId: parsed.eventId,
+					status: parsed.status,
+					limit: parsed.limit,
+				},
+				parsed,
+			),
+			parsed.pretty,
+		);
+		return;
+	}
+	if (parsed.type === "flow-get-run") {
+		writeJson(
+			await callWorkspaceBackend("flow.getRun", { runId: parsed.runId }, parsed),
+			parsed.pretty,
+		);
+	}
+}
+
+async function callAppServer(
+	method: string,
+	params: unknown,
+	options: { url: string; timeoutMs: number },
+): Promise<unknown> {
+	const client = new CodexAppServerClient({
+		...(options.url === "stdio://"
+			? { transportOptions: { requestTimeoutMs: options.timeoutMs } }
+			: {
+					webSocketTransportOptions: {
+						url: options.url,
+						requestTimeoutMs: options.timeoutMs,
+					},
+				}),
+		clientName: "codex-flows-cli",
+		clientTitle: "Codex Flows CLI",
+		clientVersion: "0.1.0",
+	});
+	client.on("request", (message) => {
+		client.respondError(
+			message.id,
+			-32603,
+			"codex-flows CLI does not handle app-server requests",
+		);
+	});
+	try {
+		await client.connect();
+		return await client.request(method, params);
+	} finally {
+		client.close();
+	}
+}
+
+async function initializeWorkspaceBackend(options: {
+	url: string;
+	timeoutMs: number;
+}): Promise<WorkspaceBackendInitializeResponse> {
+	return await withWorkspaceTransport(options, async (transport) =>
+		await initialize(transport)
+	);
+}
+
+async function callWorkspaceBackend(
+	method: string,
+	params: unknown,
+	options: { url: string; timeoutMs: number },
+): Promise<unknown> {
+	return await withWorkspaceTransport(options, async (transport) => {
+		await initialize(transport);
+		return await transport.request(method, params);
+	});
+}
+
+async function withWorkspaceTransport<T>(
+	options: { url: string; timeoutMs: number },
+	callback: (transport: CodexWebSocketTransport) => Promise<T>,
+): Promise<T> {
+	const transport = new CodexWebSocketTransport({
+		url: options.url,
+		requestTimeoutMs: options.timeoutMs,
+	});
+	try {
+		transport.start();
+		return await callback(transport);
+	} finally {
+		transport.close();
+	}
+}
+
+async function initialize(
+	transport: CodexWebSocketTransport,
+): Promise<WorkspaceBackendInitializeResponse> {
+	return await transport.request<WorkspaceBackendInitializeResponse>(
+		WORKSPACE_BACKEND_INITIALIZE_METHOD,
+		{
+			clientInfo: {
+				name: "codex-flows-cli",
+				title: "Codex Flows CLI",
+				version: "0.1.0",
+			},
+			capabilities: {
+				appServerPassThrough: true,
+			},
+		},
+	);
+}
+
+async function collectBackendInfo(options: {
+	appUrl: string;
+	workspaceUrl: string;
+	timeoutMs: number;
+}): Promise<FetchBackendInfo> {
+	const workspace = await tryCollectWorkspaceBackendInfo(options);
+	if (workspace.status === "connected") {
+		return workspace;
+	}
+	const appServer = await tryCollectAppServerInfo(options);
+	if (appServer.status === "connected") {
+		return {
+			...appServer,
+			error: workspace.error
+				? `Workspace probe failed: ${workspace.error}`
+				: undefined,
+		};
+	}
+	return {
+		mode: "local",
+		status: "unavailable",
+		error: [
+			workspace.error ? `workspace: ${workspace.error}` : undefined,
+			appServer.error ? `app-server: ${appServer.error}` : undefined,
+		].filter(Boolean).join("; ") || "No backend responded",
+	};
+}
+
+async function tryCollectWorkspaceBackendInfo(options: {
+	workspaceUrl: string;
+	timeoutMs: number;
+}): Promise<FetchBackendInfo> {
+	const transport = new CodexWebSocketTransport({
+		url: options.workspaceUrl,
+		requestTimeoutMs: options.timeoutMs,
+	});
+	transport.on("error", () => {});
+	try {
+		return await withProbeTimeout(async () => {
+			const initialized = await initialize(transport);
+			const methods = new Set(initialized.capabilities.workspaceMethods);
+			const threads = await collectThreadsViaWorkspace(transport);
+			const delegations = methods.has("delegation.list")
+				? await optionalProbe(() => collectDelegations(transport))
+				: undefined;
+			const flow = methods.has("flow.listRuns") || methods.has("flow.listEvents")
+				? await optionalProbe(() => collectFlow(transport, methods))
+				: undefined;
+			return {
+				mode: "workspace",
+				status: "connected",
+				url: options.workspaceUrl,
+				server: initialized.serverInfo,
+				capabilities: {
+					workspaceMethods: initialized.capabilities.workspaceMethods.length,
+					flowInspection: initialized.capabilities.flowInspection,
+				},
+				threads,
+				...(delegations ? { delegations } : {}),
+				...(flow ? { flow } : {}),
+			};
+		}, options.timeoutMs, `workspace backend probe timed out after ${options.timeoutMs}ms`);
+	} catch (error) {
+		return {
+			mode: "workspace",
+			status: "unavailable",
+			url: options.workspaceUrl,
+			error: errorMessage(error),
+		};
+	} finally {
+		transport.close();
+	}
+}
+
+async function tryCollectAppServerInfo(options: {
+	appUrl: string;
+	timeoutMs: number;
+}): Promise<FetchBackendInfo> {
+	if (options.appUrl !== "stdio://") {
+		return await tryCollectAppServerWebSocketInfo(options);
+	}
+	const client = new CodexAppServerClient({
+		transportOptions: { requestTimeoutMs: options.timeoutMs },
+		clientName: "codex-flows-fetch",
+		clientTitle: "Codex Flows Fetch",
+		clientVersion: "0.1.0",
+	});
+	client.on("request", (message) => {
+		client.respondError(
+			message.id,
+			-32603,
+			"codex-flows fetch does not handle app-server requests",
+		);
+	});
+	client.on("error", () => {});
+	try {
+		return await withProbeTimeout(async () => {
+			await client.connect();
+			return {
+				mode: "app-server",
+				status: "connected",
+				url: options.appUrl,
+				threads: await collectThreadsViaAppServer(client),
+			};
+		}, options.timeoutMs, `app-server probe timed out after ${options.timeoutMs}ms`);
+	} catch (error) {
+		return {
+			mode: "app-server",
+			status: "unavailable",
+			url: options.appUrl,
+			error: errorMessage(error),
+		};
+	} finally {
+		client.close();
+	}
+}
+
+async function tryCollectAppServerWebSocketInfo(options: {
+	appUrl: string;
+	timeoutMs: number;
+}): Promise<FetchBackendInfo> {
+	const transport = new CodexWebSocketTransport({
+		url: options.appUrl,
+		requestTimeoutMs: options.timeoutMs,
+	});
+	transport.on("error", () => {});
+	try {
+		return await withProbeTimeout(async () => {
+			await initializeAppServerTransport(transport);
+			return {
+				mode: "app-server",
+				status: "connected",
+				url: options.appUrl,
+				threads: await collectThreadsViaAppServer(transport),
+			};
+		}, options.timeoutMs, `app-server probe timed out after ${options.timeoutMs}ms`);
+	} catch (error) {
+		return {
+			mode: "app-server",
+			status: "unavailable",
+			url: options.appUrl,
+			error: errorMessage(error),
+		};
+	} finally {
+		transport.close();
+	}
+}
+
+async function initializeAppServerTransport(
+	transport: CodexWebSocketTransport,
+): Promise<void> {
+	await transport.request("initialize", {
+		clientInfo: {
+			name: "codex-flows-fetch",
+			title: "Codex Flows Fetch",
+			version: "0.1.0",
+		},
+		capabilities: {
+			experimentalApi: true,
+		},
+	});
+	transport.notify("initialized");
+}
+
+async function collectThreadsViaWorkspace(
+	transport: CodexWebSocketTransport,
+): Promise<FetchThreadsInfo> {
+	try {
+		const response = await transport.request(APP_SERVER_CALL_METHOD, {
+			method: "thread/list",
+			params: threadListParams(),
+		});
+		return summarizeThreads(response);
+	} catch (error) {
+		return {
+			total: 0,
+			active: 0,
+			idle: 0,
+			other: 0,
+			latest: [],
+			error: errorMessage(error),
+		};
+	}
+}
+
+async function collectThreadsViaAppServer(
+	client: { request<T = unknown>(method: string, params?: unknown): Promise<T> },
+): Promise<FetchThreadsInfo> {
+	try {
+		return summarizeThreads(await client.request("thread/list", threadListParams()));
+	} catch (error) {
+		return {
+			total: 0,
+			active: 0,
+			idle: 0,
+			other: 0,
+			latest: [],
+			error: errorMessage(error),
+		};
+	}
+}
+
+async function collectDelegations(
+	transport: CodexWebSocketTransport,
+): Promise<FetchCountInfo> {
+	const response = record(await transport.request("delegation.list", {}));
+	return summarizeStatusList(arrayValue(response.delegations));
+}
+
+async function collectFlow(
+	transport: CodexWebSocketTransport,
+	methods: Set<string>,
+): Promise<FetchFlowInfo> {
+	const runs = methods.has("flow.listRuns")
+		? await optionalProbe(async () =>
+			summarizeFlowRuns(arrayValue(await transport.request("flow.listRuns", { limit: 25 })))
+		)
+		: emptyFlowRunCounts();
+	const events = methods.has("flow.listEvents")
+		? await optionalProbe(async () =>
+			arrayValue(await transport.request("flow.listEvents", { limit: 25 })).length
+		)
+		: 0;
+	return {
+		runs: runs ?? emptyFlowRunCounts(),
+		eventsListed: events ?? 0,
+	};
+}
+
+function threadListParams(): Record<string, unknown> {
+	return {
+		limit: 20,
+		sortKey: "updated_at",
+		sortDirection: "desc",
+		archived: false,
+		useStateDbOnly: true,
+	};
+}
+
+function summarizeThreads(value: unknown): FetchThreadsInfo {
+	const threads = arrayValue(record(value).data);
+	let active = 0;
+	let idle = 0;
+	let other = 0;
+	const latest: FetchThreadSummary[] = [];
+	for (const thread of threads) {
+		const input = record(thread);
+		const status = threadStatusLabel(input.status);
+		if (status === "active") {
+			active += 1;
+		} else if (status === "idle" || status === "notLoaded") {
+			idle += 1;
+		} else {
+			other += 1;
+		}
+		const id = stringValue(input.id) ?? "unknown";
+		latest.push({
+			id,
+			label: threadLabel(input),
+			status,
+			...(stringValue(input.cwd) ? { cwd: stringValue(input.cwd) } : {}),
+			...(typeof input.updatedAt === "number"
+				? { updatedAt: new Date(input.updatedAt * 1000).toISOString() }
+				: {}),
+		});
+	}
+	return {
+		total: threads.length,
+		active,
+		idle,
+		other,
+		latest,
+	};
+}
+
+function summarizeStatusList(values: unknown[]): FetchCountInfo {
+	const counts: FetchCountInfo = {
+		total: values.length,
+		active: 0,
+		idle: 0,
+		failed: 0,
+		complete: 0,
+		reported: 0,
+		other: 0,
+	};
+	for (const value of values) {
+		const status = stringValue(record(value).status);
+		if (status === "active") {
+			counts.active += 1;
+		} else if (status === "idle") {
+			counts.idle = (counts.idle ?? 0) + 1;
+		} else if (status === "failed") {
+			counts.failed = (counts.failed ?? 0) + 1;
+		} else if (status === "complete") {
+			counts.complete = (counts.complete ?? 0) + 1;
+		} else if (status === "reported") {
+			counts.reported = (counts.reported ?? 0) + 1;
+		} else {
+			counts.other = (counts.other ?? 0) + 1;
+		}
+	}
+	return counts;
+}
+
+function summarizeFlowRuns(values: unknown[]): FetchFlowRunCounts {
+	const counts = emptyFlowRunCounts();
+	counts.total = values.length;
+	for (const value of values) {
+		const status = stringValue(record(value).status);
+		if (status === "queued") {
+			counts.queued += 1;
+		} else if (status === "running") {
+			counts.running += 1;
+		} else if (status === "completed") {
+			counts.completed += 1;
+		} else if (status === "failed") {
+			counts.failed += 1;
+		} else {
+			counts.other += 1;
+		}
+	}
+	return counts;
+}
+
+function emptyFlowRunCounts(): FetchFlowRunCounts {
+	return {
+		total: 0,
+		queued: 0,
+		running: 0,
+		completed: 0,
+		failed: 0,
+		other: 0,
+	};
+}
+
+async function optionalProbe<T>(callback: () => Promise<T>): Promise<T | undefined> {
+	try {
+		return await callback();
+	} catch {
+		return undefined;
+	}
+}
+
+async function withProbeTimeout<T>(
+	callback: () => Promise<T>,
+	timeoutMs: number,
+	message: string,
+): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			callback(),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timer) {
+			clearTimeout(timer);
+		}
+	}
+}
+
+function threadStatusLabel(value: unknown): string {
+	const input = record(value);
+	return stringValue(input.type) ?? "unknown";
+}
+
+function threadLabel(thread: Record<string, unknown>): string {
+	const name = stringValue(thread.name);
+	if (name) {
+		return truncate(name, 36);
+	}
+	const preview = stringValue(thread.preview);
+	if (preview) {
+		return truncate(preview.replace(/\s+/g, " "), 36);
+	}
+	return "untitled";
+}
+
+function truncate(value: string, maxLength: number): string {
+	return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`;
+}
+
+function record(value: unknown): Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? value as Record<string, unknown>
+		: {};
+}
+
+function arrayValue(value: unknown): unknown[] {
+	return Array.isArray(value) ? value : [];
+}
+
+function stringValue(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+async function readParams(paramsText: string | undefined): Promise<unknown> {
+	if (paramsText !== undefined) {
+		return parseJson(paramsText);
+	}
+	if (process.stdin.isTTY) {
+		return undefined;
+	}
+	const text = await readStdin();
+	return text.trim() ? parseJson(text) : undefined;
+}
+
+async function readStdin(): Promise<string> {
+	let text = "";
+	for await (const chunk of process.stdin) {
+		text += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+	}
+	return text;
+}
+
+function parseJson(text: string): unknown {
+	try {
+		return JSON.parse(text) as unknown;
+	} catch (error) {
+		throw new Error(`Failed to parse JSON params: ${errorMessage(error)}`);
+	}
+}
+
+function writeJson(value: unknown, pretty: boolean): void {
+	write(`${JSON.stringify(value, null, pretty ? 2 : 0)}\n`);
+}
+
+function write(text: string): void {
+	process.stdout.write(text);
+}
+
+function helpText(): string {
+	return `codex-flows controls Codex app-server and workspace backend surfaces.
+
+Usage:
+  codex-flows fetch [--json] [--no-color]
+  codex-flows neofetch [--json] [--no-color]
+
+  codex-flows app <method> [params-json]
+  codex-flows app call <method> [params-json]
+  echo '<params-json>' | codex-flows app <method>
+  codex-flows app actions
+
+  codex-flows workspace <method> [params-json]
+  codex-flows workspace call <method> [params-json]
+  codex-flows workspace app <method> [params-json]
+  codex-flows workspace methods
+
+  codex-flows flow dispatch --event <event.json>
+  codex-flows flow events [--type <type>] [--limit <n>]
+  codex-flows flow event <event-id>
+  codex-flows flow replay <event-id> [--wait]
+  codex-flows flow runs [--event-id <id>] [--status <status>] [--limit <n>]
+  codex-flows flow run <run-id>
+
+Options:
+  --app-url, --app-server-url <url>          App-server WebSocket URL.
+                                             Defaults to CODEX_WORKSPACE_APP_SERVER_WS_URL
+                                             or ${DEFAULT_APP_SERVER_WS_URL}.
+                                             Use stdio:// to spawn a local app-server.
+  --workspace-url, --workspace-backend-url <url>
+                                             Workspace backend WebSocket URL.
+                                             Defaults to CODEX_WORKSPACE_BACKEND_WS_URL
+                                             or ${DEFAULT_WORKSPACE_BACKEND_WS_URL}.
+  --url, --ws-url <url>                      Set both app and workspace URLs.
+  --timeout-ms <ms>                          Request timeout. Defaults to 90000,
+                                             or 1500 for fetch probes.
+  --compact                                  Print compact JSON.
+  --pretty                                   Print pretty JSON.
+  --json                                     Print JSON for fetch.
+  --no-color                                 Disable ANSI colors for fetch.
+  -h, --help                                 Show this help.
+
+Examples:
+  codex-flows fetch
+  codex-flows fetch --workspace-url ws://127.0.0.1:3586
+  codex-flows app thread/list '{"limit":20,"sourceKinds":[]}'
+  codex-flows workspace app thread/list '{"limit":20,"sourceKinds":[]}'
+  codex-flows workspace delegation.list
+  codex-flows flow events --limit 20
+`;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}

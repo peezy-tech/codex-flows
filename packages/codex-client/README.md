@@ -4,6 +4,9 @@ Workspace package for talking to `codex app-server`.
 
 This package owns the low-level JSON-RPC client, transports, framework-agnostic flow helpers, and generated Codex app-server protocol types.
 
+It also publishes the `codex-flows` CLI for app-server, workspace-backend, and
+workspace flow inspection commands.
+
 ## Exports
 
 - `@peezy.tech/codex-flows`
@@ -143,6 +146,30 @@ await client.request(action.method, action.params);
 ```
 
 The app-server protocol remains the source of truth for thread commands.
+
+## CLI
+
+After installing the package, use `codex-flows` for direct app-server calls,
+workspace backend methods, and flow inspection through a workspace backend:
+
+```bash
+codex-flows app thread/list '{"limit":20,"sourceKinds":[]}'
+codex-flows workspace app thread/list '{"limit":20,"sourceKinds":[]}'
+codex-flows workspace delegation.list
+codex-flows flow events --limit 20
+codex-flows flow run run_abc123
+codex-flows fetch
+```
+
+The direct app-server path defaults to `CODEX_WORKSPACE_APP_SERVER_WS_URL` or
+`ws://127.0.0.1:3585`. The workspace path defaults to
+`CODEX_WORKSPACE_BACKEND_WS_URL` or `ws://127.0.0.1:3586`. Use `--app-url`,
+`--workspace-url`, or `--url` to override endpoints. `codex-flows fetch` is a
+neofetch-style snapshot that first probes the configured workspace backend,
+falls back to the configured app-server, and then prints local-only package,
+runtime, endpoint, and Codex environment settings if no backend responds. When
+connected through a workspace backend it includes server capabilities, recent
+thread counts, delegation counts, and flow run/event counts.
 
 ## Scripts
 

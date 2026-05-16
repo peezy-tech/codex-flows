@@ -177,6 +177,9 @@ The low-level app-server client package. It exports:
   protocol server, and built-in capability primitives.
 - `@peezy.tech/codex-flows/rpc`: JSON-RPC helpers and types.
 - `@peezy.tech/codex-flows/generated`: generated Codex app-server protocol types.
+- `codex-flows`: publishable CLI for app-server calls, workspace backend
+  methods, flow inspection through the workspace backend, and a neofetch-style
+  backend/local environment snapshot.
 
 ### `@peezy.tech/codex-opencode-go-router`
 

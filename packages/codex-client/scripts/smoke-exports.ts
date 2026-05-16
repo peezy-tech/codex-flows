@@ -4,6 +4,7 @@ const checks = [
 	["@peezy.tech/codex-flows/flows", ["CodexFlowClient", "createCodexFlowClient"]],
 	["@peezy.tech/codex-flows/auth", ["CodexAuthClient", "createCodexAuthClient"]],
 	["@peezy.tech/codex-flows/workbench", ["createThreadSnapshot", "turnStartDescriptor"]],
+	["@peezy.tech/codex-flows/workspace-backend", ["CodexWorkspaceBackendClient"]],
 	["@peezy.tech/codex-flows/rpc", ["JsonRpcError"]],
 	["@peezy.tech/codex-flows/generated", ["v2"]],
 ] as const;
