@@ -14,6 +14,7 @@ four related surfaces:
   `FLOW_RESULT`
 - workspace backend and Discord operation for long-running workspace control
 - repo-native workspace autonomy and Codex memory transplant tools
+- repo-local pack installation for skills, flows, plugins, and hooks
 
 The project keeps product-specific completion outside the generic layer. Flow
 steps can produce results, backends can store and replay runs, and workspace
@@ -31,6 +32,7 @@ credentials, domain state, release policy, and final side effects.
 | Run a local flow backend | [Operate the workspace flow backend](guides/operate-workspace-flow-backend) |
 | Schedule repo-local workspace tasks | [Workspace autonomy](guides/workspace-autonomy) |
 | Move durable Codex memories between global and repo homes | [Memory transplant](guides/memory-transplant) |
+| Install reusable skills, flows, plugins, and hooks into a workspace | [Install pack repos](guides/install-pack-repos) |
 | Operate Discord over the workspace backend | [Discord bridge](reference/discord-bridge) |
 | Maintain releases | [Operate Codex release flows](guides/operate-codex-release-flows) and `RELEASE.md` |
 
@@ -47,7 +49,7 @@ credentials, domain state, release policy, and final side effects.
 - `@peezy.tech/codex-flows/rpc`: JSON-RPC message helpers
 - `@peezy.tech/codex-flows/generated`: generated app-server protocol types
 - `codex-flows`: CLI for fetch, app-server calls, workspace backend calls,
-  flow inspection, workspace autonomy, and memory transplant
+  flow inspection, workspace autonomy, memory transplant, and pack repo install
 
 ## Workspace Autonomy In One Screen
 
@@ -104,6 +106,26 @@ The command copies only durable Codex memory artifacts:
 `rollout_summaries/*.md`. It skips auth, logs, sessions, sqlite databases,
 skills, `.git`, generated extension machinery, and other runtime internals.
 
+## Pack Install In One Screen
+
+Pack repos collect reusable Codex capabilities for installation into a workspace
+repo. Inspect first:
+
+```bash
+codex-flows pack inspect owner/repo
+codex-flows pack add owner/repo --include tdd
+```
+
+Apply only after reviewing the dry-run:
+
+```bash
+codex-flows pack add owner/repo --include tdd --apply
+```
+
+Installs stay repo-local: skills go to `.agents/skills`, flows to
+`.codex/flows`, plugins to `plugins` plus `.agents/plugins/marketplace.json`,
+and direct hooks to `.codex/hooks` plus `.codex/hooks.json`.
+
 ## Flow Automation In One Screen
 
 Products dispatch generic events:
@@ -135,5 +157,6 @@ turns.
 - Workspace autonomy owns repo-local schedules and generated workspace state
   under `.codex/workspace`.
 - Memory transplant owns file-based copies under `memories/` only.
+- Pack install owns repo-local capability copies and `.codex/pack-lock.json`.
 - Products own final domain completion, external credentials, deployment policy,
   Discord routing policy, and release side effects.

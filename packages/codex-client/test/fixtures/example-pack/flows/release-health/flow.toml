@@ -1,0 +1,11 @@
+name = "release-health"
+version = 1
+description = "Check release readiness."
+
+[[steps]]
+name = "check"
+runner = "bun"
+script = "exec/check.ts"
+
+[steps.trigger]
+type = "release.requested"

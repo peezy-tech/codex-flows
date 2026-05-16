@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: Commands for app-server calls, workspace backend calls, flow inspection, workspace autonomy, and memory transplant.
+description: Commands for app-server calls, workspace backend calls, flow inspection, workspace autonomy, memory transplant, and pack repos.
 ---
 
 # CLI reference
@@ -93,6 +93,29 @@ The command is dry-run by default. It copies only durable memory artifacts under
 `memories/`: `MEMORY.md`, `memory_summary.md`, `raw_memories.md`, and
 `rollout_summaries/*.md`. See [Memory transplant](../guides/memory-transplant).
 
+## Pack Repos
+
+```bash
+codex-flows pack inspect <source> [--json]
+codex-flows pack add <source> [--apply] [--include <name>] [--exclude <name>]
+codex-flows pack doctor [--json]
+codex-flows pack list [--json]
+```
+
+`pack inspect` discovers skills, flow packages, plugins, and hook bundles from a
+local directory, GitHub shorthand such as `owner/repo`, or a Git URL. Use
+`--ref <ref>` with GitHub shorthand or Git URL sources.
+
+`pack add` is dry-run by default and writes only with `--apply`. It installs
+repo-local capabilities into `.agents/skills`, `.codex/flows`, `plugins`,
+`.agents/plugins/marketplace.json`, `.codex/hooks`, and `.codex/hooks.json`.
+Changed destinations are conflicts unless `--overwrite` is set; overwrite backs
+up replaced item directories under `.codex/pack-backups/<timestamp>/`.
+
+`pack list` reads `.codex/pack-lock.json`. `pack doctor` checks the lockfile,
+destination paths, plugin marketplace JSON, and direct hook JSON. See
+[Install pack repos](../guides/install-pack-repos).
+
 ## Flow Inspection
 
 ```bash
@@ -157,8 +180,11 @@ bun run flow:backend replay-event <event-id> --wait
 | `--workspace-root <path>` | Workspace root. Defaults to discovery. |
 | `--global-codex-home <path>` | Global Codex home for memory transplant. |
 | `--workspace-codex-home <path>` | Workspace Codex home for memory transplant. |
-| `--apply` | Apply memory transplant changes. |
-| `--overwrite` | Replace destination memory files after backup. |
+| `--apply` | Apply memory transplant or pack install changes. |
+| `--overwrite` | Replace destination memory files or changed pack item directories after backup. |
+| `--ref <ref>` | Git ref for non-local pack sources. |
+| `--include <name>` | Include a pack item by name or `kind:name`. |
+| `--exclude <name>` | Exclude a pack item by name or `kind:name`. |
 | `--merge codex` | Merge `MEMORY.md` and `memory_summary.md` with Codex. |
 | `--no-backup` | Disable overwrite or merge backups. |
 

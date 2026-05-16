@@ -52,6 +52,48 @@ describe("codex-flows CLI args", () => {
 		});
 	});
 
+	test("parses pack commands", () => {
+		expect(parseArgs(["pack", "inspect", "owner/repo", "--ref", "main", "--json"], {}))
+			.toEqual({
+				type: "pack-inspect",
+				source: "owner/repo",
+				ref: "main",
+				json: true,
+			});
+		expect(parseArgs([
+			"--workspace-root",
+			"/workspace",
+			"pack",
+			"add",
+			"./pack",
+			"--apply",
+			"--overwrite",
+			"--include",
+			"tdd",
+			"--exclude=repo-policy",
+		], {})).toEqual({
+			type: "pack-add",
+			source: "./pack",
+			ref: undefined,
+			workspaceRoot: "/workspace",
+			apply: true,
+			overwrite: true,
+			include: ["tdd"],
+			exclude: ["repo-policy"],
+			json: false,
+		});
+		expect(parseArgs(["pack", "doctor", "--json"], {})).toEqual({
+			type: "pack-doctor",
+			workspaceRoot: undefined,
+			json: true,
+		});
+		expect(parseArgs(["pack", "list"], {})).toEqual({
+			type: "pack-list",
+			workspaceRoot: undefined,
+			json: false,
+		});
+	});
+
 	test("rejects invalid method names", () => {
 		expect(() => parseArgs(["workspace", "not a method"], {}))
 			.toThrow("workspace method must be a JSON-RPC method name");

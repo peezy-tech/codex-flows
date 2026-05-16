@@ -61,6 +61,10 @@ const requiredCliLines = [
 	"codex-flows workspace run <task-id> [--mode auto|local|actions]",
 	"codex-flows memories transplant global-to-workspace [--apply]",
 	"codex-flows memories transplant workspace-to-global [--apply]",
+	"codex-flows pack inspect <source> [--json]",
+	"codex-flows pack add <source> [--apply] [--include <name>] [--exclude <name>]",
+	"codex-flows pack doctor [--json]",
+	"codex-flows pack list [--json]",
 	"codex-flows flow dispatch --event <event.json>",
 	"--merge codex",
 ];
@@ -84,14 +88,17 @@ await expectExcludes("SECURITY.md", "codex-bare");
 await expectIncludes("SECURITY.md", "Memory transplant");
 await expectIncludes("README.md", "docs/pages/guides/workspace-autonomy.md");
 await expectIncludes("README.md", "docs/pages/guides/memory-transplant.md");
+await expectIncludes("README.md", "docs/pages/guides/install-pack-repos.md");
 
 await expectIncludes("docs/tome.config.js", "\"guides/workspace-autonomy\"");
 await expectIncludes("docs/tome.config.js", "\"guides/memory-transplant\"");
+await expectIncludes("docs/tome.config.js", "\"guides/install-pack-repos\"");
 await expectIncludes("docs/tome.config.js", "RELEASE.md");
 await expectIncludes("docs/index.html", "<title>codex-flows</title>");
 
 await expectIncludes("docs/pages/index.md", "Workspace autonomy");
 await expectIncludes("docs/pages/index.md", "Memory transplant");
+await expectIncludes("docs/pages/index.md", "Pack Install");
 await expectIncludes("docs/pages/index.md", "@peezy.tech/codex-flows");
 await expectIncludes("docs/pages/reference/packages.md", "workspace autonomy");
 await expectIncludes("docs/pages/reference/packages.md", "memory transplant");
@@ -108,8 +115,14 @@ await expectIncludes("docs/pages/guides/memory-transplant.md", "rollout_summarie
 await expectIncludes("docs/pages/guides/memory-transplant.md", "sqlite");
 await expectIncludes("docs/pages/guides/memory-transplant.md", "skills");
 
+await expectIncludes("docs/pages/guides/install-pack-repos.md", "pack repo");
+await expectIncludes("docs/pages/guides/install-pack-repos.md", ".codex/pack-lock.json");
+await expectIncludes("docs/pages/guides/install-pack-repos.md", ".agents/plugins/marketplace.json");
+await expectIncludes("docs/pages/guides/install-pack-repos.md", "[features].plugin_hooks = true");
+
 await expectIncludes("packages/codex-client/README.md", "codex-flows workspace doctor");
 await expectIncludes("packages/codex-client/README.md", "codex-flows memories transplant global-to-workspace");
+await expectIncludes("packages/codex-client/README.md", "codex-flows pack inspect owner/repo");
 
 if (failures.length > 0) {
 	for (const failure of failures) {

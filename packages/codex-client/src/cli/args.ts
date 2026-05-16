@@ -122,6 +122,33 @@ export type ParsedCli =
 			merge?: "codex";
 			backup: boolean;
 			json: boolean;
+	  }
+	| {
+			type: "pack-inspect";
+			source: string;
+			ref?: string;
+			json: boolean;
+	  }
+	| {
+			type: "pack-add";
+			source: string;
+			ref?: string;
+			workspaceRoot?: string;
+			apply: boolean;
+			overwrite: boolean;
+			include: string[];
+			exclude: string[];
+			json: boolean;
+	  }
+	| {
+			type: "pack-doctor";
+			workspaceRoot?: string;
+			json: boolean;
+	  }
+	| {
+			type: "pack-list";
+			workspaceRoot?: string;
+			json: boolean;
 	  };
 
 export const DEFAULT_APP_SERVER_WS_URL = "ws://127.0.0.1:3585";
@@ -155,6 +182,9 @@ export function parseArgs(
 	let overwrite = false;
 	let merge: "codex" | undefined;
 	let backup = true;
+	let ref: string | undefined;
+	const include: string[] = [];
+	const exclude: string[] = [];
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -272,6 +302,30 @@ export function parseArgs(
 		}
 		if (arg === "--overwrite") {
 			overwrite = true;
+			continue;
+		}
+		if (arg === "--ref") {
+			ref = required(argv, ++index, arg);
+			continue;
+		}
+		if (arg.startsWith("--ref=")) {
+			ref = arg.slice("--ref=".length);
+			continue;
+		}
+		if (arg === "--include") {
+			include.push(required(argv, ++index, arg));
+			continue;
+		}
+		if (arg.startsWith("--include=")) {
+			include.push(arg.slice("--include=".length));
+			continue;
+		}
+		if (arg === "--exclude") {
+			exclude.push(required(argv, ++index, arg));
+			continue;
+		}
+		if (arg.startsWith("--exclude=")) {
+			exclude.push(arg.slice("--exclude=".length));
 			continue;
 		}
 		if (arg === "--merge") {
@@ -557,6 +611,45 @@ export function parseArgs(
 			backup,
 			json,
 		};
+	}
+	if (command === "pack") {
+		const subcommand = positionals[1];
+		if (subcommand === "inspect") {
+			return {
+				type: "pack-inspect",
+				source: requiredPositional(positionals, 2, "pack inspect requires <source>"),
+				ref,
+				json,
+			};
+		}
+		if (subcommand === "add") {
+			return {
+				type: "pack-add",
+				source: requiredPositional(positionals, 2, "pack add requires <source>"),
+				ref,
+				workspaceRoot,
+				apply,
+				overwrite,
+				include,
+				exclude,
+				json,
+			};
+		}
+		if (subcommand === "doctor") {
+			return {
+				type: "pack-doctor",
+				workspaceRoot,
+				json,
+			};
+		}
+		if (subcommand === "list") {
+			return {
+				type: "pack-list",
+				workspaceRoot,
+				json,
+			};
+		}
+		throw new Error("pack requires inspect, add, doctor, or list");
 	}
 	throw new Error(`Unknown command: ${command}`);
 }

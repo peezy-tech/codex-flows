@@ -20,6 +20,7 @@ Full documentation lives in the repo docs site:
 - package reference: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/reference/packages.md>
 - workspace autonomy: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/workspace-autonomy.md>
 - memory transplant: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/memory-transplant.md>
+- pack repos: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/install-pack-repos.md>
 
 ## Exports
 
@@ -138,6 +139,8 @@ codex-flows workspace app thread/list '{"limit":20,"sourceKinds":[]}'
 codex-flows workspace doctor
 codex-flows workspace tick --mode local
 codex-flows memories transplant global-to-workspace
+codex-flows pack inspect owner/repo
+codex-flows pack add ./engineering-capabilities --apply
 codex-flows flow events --limit 20
 ```
 

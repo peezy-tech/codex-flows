@@ -33,6 +33,16 @@ import {
 	formatMemoryTransplantPlan,
 } from "./memories.ts";
 import {
+	applyPackAdd,
+	collectPackDoctor,
+	formatPackAddPlan,
+	formatPackDoctor,
+	formatPackInspection,
+	formatPackList,
+	inspectPackSource,
+	listInstalledPacks,
+} from "./pack.ts";
+import {
 	collectWorkspaceDoctorInfo,
 	commitActionsWorkspaceState,
 	createWorkspaceContext,
@@ -220,6 +230,34 @@ async function main(): Promise<void> {
 		write(parsed.json
 			? `${JSON.stringify(plan, null, 2)}\n`
 			: formatMemoryTransplantPlan(plan));
+		return;
+	}
+	if (parsed.type === "pack-inspect") {
+		const inspection = await inspectPackSource(parsed);
+		write(parsed.json
+			? `${JSON.stringify(inspection, null, 2)}\n`
+			: formatPackInspection(inspection));
+		return;
+	}
+	if (parsed.type === "pack-add") {
+		const plan = await applyPackAdd(parsed);
+		write(parsed.json
+			? `${JSON.stringify(plan, null, 2)}\n`
+			: formatPackAddPlan(plan));
+		return;
+	}
+	if (parsed.type === "pack-doctor") {
+		const result = await collectPackDoctor(parsed);
+		write(parsed.json
+			? `${JSON.stringify(result, null, 2)}\n`
+			: formatPackDoctor(result));
+		return;
+	}
+	if (parsed.type === "pack-list") {
+		const result = await listInstalledPacks(parsed);
+		write(parsed.json
+			? `${JSON.stringify(result, null, 2)}\n`
+			: formatPackList(result));
 		return;
 	}
 }
@@ -784,6 +822,11 @@ Usage:
   codex-flows memories transplant global-to-workspace [--apply]
   codex-flows memories transplant workspace-to-global [--apply]
 
+  codex-flows pack inspect <source> [--json]
+  codex-flows pack add <source> [--apply] [--include <name>] [--exclude <name>]
+  codex-flows pack doctor [--json]
+  codex-flows pack list [--json]
+
   codex-flows flow dispatch --event <event.json>
   codex-flows flow events [--type <type>] [--limit <n>]
   codex-flows flow event <event-id>
@@ -813,6 +856,11 @@ Options:
   --workspace-codex-home <path>              Workspace Codex home for memories transplant.
   --apply                                    Apply memory transplant changes.
   --overwrite                                Replace destination memory files after backup.
+                                             For pack add, replace changed installed item dirs
+                                             after backup under .codex/pack-backups.
+  --ref <ref>                                Git ref for non-local pack sources.
+  --include <name>                           Include a pack item by name or kind:name.
+  --exclude <name>                           Exclude a pack item by name or kind:name.
   --merge codex                              Merge MEMORY.md and memory_summary.md with Codex.
   --no-backup                                Disable overwrite/merge backups.
   -h, --help                                 Show this help.
@@ -825,6 +873,8 @@ Examples:
   codex-flows workspace delegation.list
   codex-flows workspace doctor --mode actions
   codex-flows memories transplant global-to-workspace
+  codex-flows pack inspect owner/repo
+  codex-flows pack add ./capability-pack --apply
   codex-flows flow events --limit 20
 `;
 }
