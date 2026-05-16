@@ -24,7 +24,6 @@ import {
 } from "react";
 
 import {
-	CodexAppServerClient,
 	JsonRpcError,
 	createCodexAuthClient,
 	type CodexAuthClient,
@@ -33,8 +32,13 @@ import {
 	type JsonRpcRequest,
 	type v2,
 } from "@peezy.tech/codex-flows/browser";
+import {
+	CodexGatewayClient,
+	type GatewayEvent,
+} from "@peezy.tech/codex-flows/gateway";
 
 import { ThemeProvider } from "./components/theme-provider.tsx";
+import { gatewayStorageKey, initialGatewayWsUrl } from "./gateway-url.ts";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -46,9 +50,6 @@ type EventLogEntry = {
 	body?: string;
 };
 
-const defaultWsUrl =
-	import.meta.env.VITE_CODEX_APP_SERVER_WS_URL ?? defaultProxiedWsUrl();
-
 export function App() {
 	return (
 		<ThemeProvider>
@@ -58,9 +59,15 @@ export function App() {
 }
 
 function BareCodexApp() {
-	const clientRef = useRef<CodexAppServerClient | null>(null);
+	const clientRef = useRef<CodexGatewayClient | null>(null);
 	const authRef = useRef<CodexAuthClient | null>(null);
-	const [wsUrl, setWsUrl] = useState(initialWsUrl);
+	const [wsUrl, setWsUrl] = useState(() =>
+		initialGatewayWsUrl({
+			envUrl: import.meta.env.VITE_CODEX_GATEWAY_WS_URL,
+			location: window.location,
+			storage: window.localStorage,
+		})
+	);
 	const [connectedUrl, setConnectedUrl] = useState<string>();
 	const [status, setStatus] = useState<ConnectionStatus>("disconnected");
 	const [error, setError] = useState<string>();
@@ -199,7 +206,7 @@ function BareCodexApp() {
 		}
 
 		clientRef.current?.close();
-		const client = new CodexAppServerClient({
+		const client = new CodexGatewayClient({
 			webSocketTransportOptions: { url, requestTimeoutMs: 90_000 },
 			clientName: "bare-web",
 			clientTitle: "Codex Bare Web",
@@ -216,10 +223,17 @@ function BareCodexApp() {
 				body: previewJson(message.params, 900),
 			});
 		});
+		client.on("gatewayEvent", (event: GatewayEvent) => {
+			appendEvent({
+				kind: "control",
+				title: `gateway ${event.type}`,
+				body: previewJson(event, 900),
+			});
+		});
 		client.on("error", (eventError: unknown) => {
 			appendEvent({
 				kind: "error",
-				title: "transport error",
+				title: "gateway transport error",
 				body: errorMessage(eventError),
 			});
 			setError(errorMessage(eventError));
@@ -241,7 +255,7 @@ function BareCodexApp() {
 		setError(undefined);
 		try {
 			await client.connect();
-			window.localStorage.setItem("codex-bare.ws-url", url);
+			window.localStorage.setItem(gatewayStorageKey, url);
 			setConnectedUrl(url);
 			setStatus("connected");
 			appendEvent({ kind: "control", title: "connected", body: url });
@@ -492,7 +506,7 @@ function BareCodexApp() {
 							<h1 className="truncate text-base font-semibold">Codex Bare</h1>
 						</div>
 						<p className="truncate text-xs text-muted-foreground">
-							{connectedUrl ?? "No app-server connection"}
+							{connectedUrl ?? "No gateway connection"}
 						</p>
 					</div>
 					<form
@@ -505,7 +519,7 @@ function BareCodexApp() {
 						<input
 							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:flex-1"
 							onChange={(event) => setWsUrl(event.target.value)}
-							placeholder="ws://127.0.0.1:3585"
+							placeholder="ws://127.0.0.1:3586"
 							value={wsUrl}
 						/>
 						<div className="flex gap-2">
@@ -1114,15 +1128,6 @@ function record(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
 	return typeof value === "string" && value ? value : undefined;
-}
-
-function initialWsUrl() {
-	return window.localStorage.getItem("codex-bare.ws-url") ?? defaultWsUrl;
-}
-
-function defaultProxiedWsUrl() {
-	const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-	return `${protocol}//${window.location.host}/__codex-app-server`;
 }
 
 function cx(...parts: Array<string | false | null | undefined>) {

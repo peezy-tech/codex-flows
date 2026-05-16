@@ -83,6 +83,10 @@ export class CodexAppServerClient extends CodexEventEmitter {
 		return this.transport.request<T>(method, params);
 	}
 
+	notify(method: string, params?: unknown): void {
+		this.transport.notify(method, params);
+	}
+
 	respond(id: JsonRpcId, result: unknown): void {
 		this.transport.respond(id, result);
 	}

@@ -4,6 +4,12 @@ export {
 	type CodexBrowserAppServerTransport as CodexAppServerTransport,
 } from "./app-server/browser-client.ts";
 export {
+	CodexGatewayClient,
+	type CodexGatewayClientOptions,
+	type CodexGatewayTransport,
+	type GatewayEvent,
+} from "./gateway/client.ts";
+export {
 	CodexWebSocketTransport,
 	type CodexWebSocketTransportOptions,
 } from "./app-server/websocket-transport.ts";

@@ -1,0 +1,25 @@
+{
+	"name": "codex-gateway-local",
+	"version": "0.1.0",
+	"description": "Local Codex gateway server for browser and transport clients.",
+	"type": "module",
+	"private": true,
+	"license": "Apache-2.0",
+	"bin": {
+		"codex-gateway-local": "./src/index.ts"
+	},
+	"scripts": {
+		"build": "tsc --noEmit",
+		"check:types": "tsc --noEmit",
+		"start": "bun ./src/index.ts serve",
+		"test": "bun test test/*.test.ts"
+	},
+	"dependencies": {
+		"@peezy.tech/codex-flows": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "catalog:",
+		"@types/node": "catalog:",
+		"typescript": "catalog:"
+	}
+}

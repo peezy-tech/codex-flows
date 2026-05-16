@@ -8,7 +8,8 @@
 		"build": "tsc -b && vite build",
 		"check:types": "tsc --noEmit",
 		"dev": "vite --host 127.0.0.1",
-		"preview": "vite preview --host 127.0.0.1"
+		"preview": "vite preview --host 127.0.0.1",
+		"test": "bun test test/*.test.ts"
 	},
 	"dependencies": {
 		"@workspace/ui": "workspace:*",

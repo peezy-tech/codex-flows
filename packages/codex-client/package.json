@@ -45,6 +45,10 @@
 			"types": "./dist/workbench.d.ts",
 			"import": "./dist/workbench.js"
 		},
+		"./gateway": {
+			"types": "./dist/gateway/index.d.ts",
+			"import": "./dist/gateway/index.js"
+		},
 		"./rpc": {
 			"types": "./dist/app-server/rpc.d.ts",
 			"import": "./dist/app-server/rpc.js"

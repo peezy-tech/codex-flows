@@ -67,6 +67,21 @@
         "typescript": "catalog:",
       },
     },
+    "apps/gateway": {
+      "name": "codex-gateway-local",
+      "version": "0.1.0",
+      "bin": {
+        "codex-gateway-local": "./src/index.ts",
+      },
+      "dependencies": {
+        "@peezy.tech/codex-flows": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "apps/web": {
       "name": "web",
       "version": "0.0.1",
@@ -721,6 +736,8 @@
     "codex-flow-runner": ["codex-flow-runner@workspace:apps/flow-runner"],
 
     "codex-flow-systemd-local": ["codex-flow-systemd-local@workspace:apps/flow-backend-systemd-local"],
+
+    "codex-gateway-local": ["codex-gateway-local@workspace:apps/gateway"],
 
     "collapse-white-space": ["collapse-white-space@2.1.0", "", {}, "sha512-loKTxY1zCOuG4j9f6EPnuyyYkf58RnhhWTvRoZEokgB+WbdXehfjFviyOVYkqzEWz1Q5kRiZdBYS5SwxbQYwzw=="],
 

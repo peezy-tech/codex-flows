@@ -27,6 +27,7 @@ export default {
 				"guides/enable-code-mode",
 				"guides/operate-codex-release-flows",
 				"guides/run-discord-local-backend",
+				"guides/run-web-over-local-gateway",
 			],
 		},
 		{

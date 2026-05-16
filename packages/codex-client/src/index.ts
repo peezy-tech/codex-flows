@@ -4,6 +4,16 @@ export {
 	type CodexAppServerTransport,
 } from "./app-server/client.ts";
 export {
+	CodexGatewayClient,
+	CodexGatewayProtocolServer,
+	type CodexGatewayAppServer,
+	type CodexGatewayClientOptions,
+	type CodexGatewayPeer,
+	type CodexGatewayProtocolServerOptions,
+	type CodexGatewayTransport,
+	type GatewayEvent,
+} from "./gateway/index.ts";
+export {
 	CodexStdioTransport,
 	DEFAULT_CODEX_COMMAND,
 	DEFAULT_CODEX_NPM_PACKAGE,

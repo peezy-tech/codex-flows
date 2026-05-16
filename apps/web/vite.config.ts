@@ -7,8 +7,8 @@ const allowedHosts = (process.env.VITE_ALLOWED_HOSTS ?? "")
 	.split(",")
 	.map((host) => host.trim())
 	.filter(Boolean);
-const codexAppServerTarget =
-	process.env.VITE_CODEX_APP_SERVER_PROXY_TARGET ?? "ws://127.0.0.1:3585";
+const codexGatewayTarget =
+	process.env.VITE_CODEX_GATEWAY_PROXY_TARGET ?? "ws://127.0.0.1:3586";
 
 export default defineConfig({
 	base: process.env.VITE_BASE_PATH ?? "/",
@@ -19,6 +19,10 @@ export default defineConfig({
 			"@peezy.tech/codex-flows/browser": path.resolve(
 				__dirname,
 				"../../packages/codex-client/src/browser.ts",
+			),
+			"@peezy.tech/codex-flows/gateway": path.resolve(
+				__dirname,
+				"../../packages/codex-client/src/gateway/index.ts",
 			),
 			"@peezy.tech/codex-flows": path.resolve(
 				__dirname,
@@ -42,8 +46,8 @@ export default defineConfig({
 	server: {
 		allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
 		proxy: {
-			"/__codex-app-server": {
-				target: codexAppServerTarget,
+			"/__codex-gateway": {
+				target: codexGatewayTarget,
 				ws: true,
 				rewrite: () => "/",
 				configure: (proxy) => {
