@@ -1,53 +1,41 @@
 # @peezy.tech/codex-flows
 
-Workspace package for talking to `codex app-server`.
+Codex app-server client APIs, workspace backend helpers, and the `codex-flows`
+CLI.
 
-This package owns the low-level JSON-RPC client, transports, framework-agnostic flow helpers, and generated Codex app-server protocol types.
+```bash
+bun add @peezy.tech/codex-flows
+```
 
-It also publishes the `codex-flows` CLI for app-server, workspace-backend, and
-workspace flow inspection commands.
+or:
+
+```bash
+npm install @peezy.tech/codex-flows
+```
+
+Full documentation lives in the repo docs site:
+
+- overview: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/index.md>
+- CLI reference: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/reference/cli.md>
+- package reference: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/reference/packages.md>
+- workspace autonomy: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/workspace-autonomy.md>
+- memory transplant: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/memory-transplant.md>
 
 ## Exports
 
-- `@peezy.tech/codex-flows`
-  - `CodexAppServerClient`
-  - `CodexStdioTransport`
-  - `CodexWebSocketTransport`
-  - JSON-RPC helpers and types
-- `@peezy.tech/codex-flows/browser`
-	- browser-safe `CodexAppServerClient`
-	- `CodexWebSocketTransport`
-	- JSON-RPC helpers and types
-- `@peezy.tech/codex-flows/flows`
-  - `CodexFlowClient`
-  - `createCodexFlowClient`
-  - prompt/input normalization and optional turn completion waiting
-- `@peezy.tech/codex-flows/auth`
-  - `CodexAuthClient`
-  - `createCodexAuthClient`
-  - privacy-preserving Codex account login, status, and usage helpers
-- `@peezy.tech/codex-flows/workbench`
-  - transport-neutral thread snapshots for UX surfaces
-  - reducers for app-server notifications and completed turns
-  - progress delivery state for summary, commentary, and final messages
-  - app-server request descriptors such as `{ method, params }`
-- `@peezy.tech/codex-flows/rpc`
-	- JSON-RPC message types and parsing helpers
-- `@peezy.tech/codex-flows/generated`
-  - generated Codex app-server protocol types
-- `@peezy.tech/codex-flows/generated/*`
-  - generated per-type modules
+| Export | Purpose |
+|--------|---------|
+| `@peezy.tech/codex-flows` | Node/Bun app-server client, stdio/WebSocket transports, JSON-RPC helpers, auth helpers. |
+| `@peezy.tech/codex-flows/browser` | Browser-safe app-server client and WebSocket transport. |
+| `@peezy.tech/codex-flows/flows` | Helpers for starting Codex-backed flow work. |
+| `@peezy.tech/codex-flows/auth` | Privacy-preserving Codex account login, status, and usage helpers. |
+| `@peezy.tech/codex-flows/workbench` | Transport-neutral thread UX reducers and app-server request descriptors. |
+| `@peezy.tech/codex-flows/workspace-backend` | Workspace backend protocol server/client helpers and capability primitives. |
+| `@peezy.tech/codex-flows/rpc` | JSON-RPC message types and parsing helpers. |
+| `@peezy.tech/codex-flows/generated` | Generated Codex app-server protocol types. |
+| `@peezy.tech/codex-flows/generated/*` | Generated per-type modules. |
 
-## Transports
-
-`CodexAppServerClient` defaults to a stdio transport that starts
-`codex app-server` when no explicit transport is provided. When
-`CODEX_FLOWS_MODE=code-mode`, the same stdio default becomes
-`bunx @peezy.tech/codex app-server`, so Code Mode callers automatically use the
-Peezy fork. Set `CODEX_APP_SERVER_CODEX_COMMAND` or pass
-`transportOptions.codexCommand` to use a locally built binary instead.
-
-It can also connect to an existing WebSocket app-server when `CODEX_WORKSPACE_APP_SERVER_WS_URL` is set, or when `webSocketTransportOptions.url` is passed.
+## App-Server Client
 
 ```ts
 import { CodexAppServerClient } from "@peezy.tech/codex-flows";
@@ -60,6 +48,10 @@ const threads = await client.listThreads({});
 client.close();
 ```
 
+`CodexAppServerClient` defaults to a stdio transport that starts
+`codex app-server`. Set `CODEX_APP_SERVER_CODEX_COMMAND` or pass
+`transportOptions.codexCommand` when a specific binary should be used.
+
 Browser entry:
 
 ```ts
@@ -71,7 +63,7 @@ const client = new CodexAppServerClient({
 await client.connect();
 ```
 
-Flow helpers:
+## Flow Helpers
 
 ```ts
 import { createCodexFlowClient } from "@peezy.tech/codex-flows/flows";
@@ -91,7 +83,7 @@ const result = await codex.startFlow({
 console.log(result.threadId, result.turnId);
 ```
 
-Auth helpers:
+## Auth Helpers
 
 ```ts
 import {
@@ -113,24 +105,12 @@ if (state.status !== "authenticated") {
 
 The high-level auth state intentionally omits email addresses and stable account
 identifiers. It exposes anonymous auth mode, plan, and usage data by default.
-Call the lower-level app-server client directly only when an application has an
-explicit reason to handle raw account details.
 
 ## Workbench Boundary
 
-`@peezy.tech/codex-flows/workbench` is not an app-server SDK. It does not execute
-requests and does not wrap thread commands with methods such as `setGoal`,
-`readThread`, or `startTurn`. It only derives reusable UX state from app-server
-notifications and completed turns:
-
-- active turn status
-- goal summaries
-- plan steps and plan text
-- running commands
-- recent activity
-- summary/commentary/final progress delivery state
-
-For app-server-native actions, workbench helpers return descriptors:
+`@peezy.tech/codex-flows/workbench` does not execute app-server requests. It
+derives reusable UX state from app-server notifications and completed turns, and
+returns request descriptors for actions:
 
 ```ts
 import { threadGoalSetDescriptor } from "@peezy.tech/codex-flows/workbench";
@@ -149,29 +129,21 @@ The app-server protocol remains the source of truth for thread commands.
 
 ## CLI
 
-After installing the package, use `codex-flows` for direct app-server calls,
-workspace backend methods, and flow inspection through a workspace backend:
+The package publishes the `codex-flows` binary:
 
 ```bash
+codex-flows fetch
 codex-flows app thread/list '{"limit":20,"sourceKinds":[]}'
 codex-flows workspace app thread/list '{"limit":20,"sourceKinds":[]}'
-codex-flows workspace delegation.list
+codex-flows workspace doctor
+codex-flows workspace tick --mode local
+codex-flows memories transplant global-to-workspace
 codex-flows flow events --limit 20
-codex-flows flow run run_abc123
-codex-flows fetch
 ```
 
-The direct app-server path defaults to `CODEX_WORKSPACE_APP_SERVER_WS_URL` or
-`ws://127.0.0.1:3585`. The workspace path defaults to
-`CODEX_WORKSPACE_BACKEND_WS_URL` or `ws://127.0.0.1:3586`. Use `--app-url`,
-`--workspace-url`, or `--url` to override endpoints. `codex-flows fetch` is a
-neofetch-style snapshot that first probes the configured workspace backend,
-falls back to the configured app-server, and then prints local-only package,
-runtime, endpoint, and Codex environment settings if no backend responds. When
-connected through a workspace backend it includes server capabilities, recent
-thread counts, delegation counts, and flow run/event counts.
+See `docs/pages/reference/cli.md` for the full command surface.
 
-## Scripts
+## Development Scripts
 
 ```bash
 bun run --filter @peezy.tech/codex-flows build
@@ -182,40 +154,8 @@ bun run --filter @peezy.tech/codex-flows release:check
 ```
 
 `build` emits ESM JavaScript, source maps, and declaration files into `dist`.
+`release:check` runs tests, type checking, a clean build, export smoke tests,
+and `npm pack --dry-run`.
 
-## Install
-
-After publishing, install the package from npm:
-
-```bash
-bun add @peezy.tech/codex-flows
-```
-
-or:
-
-```bash
-npm install @peezy.tech/codex-flows
-```
-
-## Publishing
-
-Run the release check before publishing:
-
-```bash
-bun run --filter @peezy.tech/codex-flows release:check
-```
-
-The release check runs package tests, type checking, a clean `dist` build, and `npm pack --dry-run`. Review the pack output before publishing so only `dist`, `README.md`, and package metadata are included.
-
-For the first publish, use a human npm session or short-lived npm token from the public `peezy-tech/codex-flows` repo checkout. The `peezy.tech` npm organization/scope must exist first, and the publishing account or token must have write access to that scope:
-
-```bash
-cd packages/codex-client
-npm publish --access public
-```
-
-After `@peezy.tech/codex-flows` exists on npm, configure trusted publishing for `.github/workflows/publish-codex-flows.yml` in the public `peezy-tech/codex-flows` repo. Future publishes should run through GitHub Actions without an npm token.
-
-## Notes
-
-Generated protocol files live in `src/app-server/generated`. Keep handwritten client and transport code outside that generated tree.
+Generated protocol files live in `src/app-server/generated`. Keep handwritten
+client and transport code outside that generated tree.

@@ -1,6 +1,6 @@
 /** @type {import('@tomehq/core').TomeConfig} */
 export default {
-	name: "codex-flow",
+	name: "codex-flows",
 	basePath: "/docs",
 	theme: {
 		preset: "editorial",
@@ -22,6 +22,8 @@ export default {
 				"guides/author-flow-package",
 				"guides/run-flows-locally",
 				"guides/dispatch-and-replay-events",
+				"guides/workspace-autonomy",
+				"guides/memory-transplant",
 				"guides/operate-workspace-flow-backend",
 				"guides/use-convex-backend",
 				"guides/enable-code-mode",
@@ -56,6 +58,6 @@ export default {
 	],
 	topNav: [
 		{ label: "GitHub", href: "https://github.com/peezy-tech/codex-flows" },
-		{ label: "Development", href: "https://github.com/peezy-tech/codex-flows/blob/main/DEVELOP.md" },
+		{ label: "Release", href: "https://github.com/peezy-tech/codex-flows/blob/main/RELEASE.md" },
 	],
 };

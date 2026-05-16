@@ -1,53 +1,136 @@
 ---
-title: codex-flow
-description: Event-driven automation packages for Codex app-server work.
+title: codex-flows
+description: App-server clients, flow automation, workspace autonomy, and memory tooling for Codex.
 ---
 
-# codex-flow
+# codex-flows
 
-codex-flow is a small automation system for running reusable Codex work from
-generic events. A product emits a `FlowEvent`, a flow package matches it with
-JSON Schema, and a runner executes a Bun or gated Code Mode step that prints a
-`FLOW_RESULT`.
+`codex-flows` is the workspace automation layer around Codex app-server. It has
+four related surfaces:
 
-The stable contract is intentionally narrow:
+- app-server clients and transports for direct Codex thread, auth, and protocol
+  work
+- generic flow automation built around `FlowEvent`, `flow.toml`, and
+  `FLOW_RESULT`
+- workspace backend and Discord operation for long-running workspace control
+- repo-native workspace autonomy and Codex memory transplant tools
 
-- Products dispatch generic `FlowEvent` objects with deterministic ids.
-- Flow packages declare triggers and scripts in `flow.toml`.
-- Steps receive the event through runner context and emit one `FLOW_RESULT`.
-- Backends track run state, attempts, output, replay, and cancellation.
-- App-owned domain completion stays outside generic flow clients and backends.
+The project keeps product-specific completion outside the generic layer. Flow
+steps can produce results, backends can store and replay runs, and workspace
+tools can schedule tasks, but each installing product still owns its own
+credentials, domain state, release policy, and final side effects.
 
-```mermaid
-flowchart LR
-  Product["Product or CLI"] --> Event["FlowEvent"]
-  Event --> Client["Flow client"]
-  Client --> Local["Local runtime"]
-  Client --> Backend["HTTP or Convex backend"]
-  Local --> Step["Flow step"]
-  Backend --> Worker["External worker"]
-  Worker --> Step
-  Step --> Result["FLOW_RESULT"]
-  Result --> ProductDone["App-owned completion"]
+## Choose Your Path
+
+| Goal | Start with |
+|------|------------|
+| Call Codex app-server from TypeScript or Bun | [Packages](reference/packages) |
+| Inspect or call app-server and workspace backend methods from a terminal | [CLI reference](reference/cli) |
+| Build a first reusable flow | [Build your first flow](tutorials/first-flow) |
+| Dispatch and replay generic events | [Dispatch and replay events](guides/dispatch-and-replay-events) |
+| Run a local flow backend | [Operate the workspace flow backend](guides/operate-workspace-flow-backend) |
+| Schedule repo-local workspace tasks | [Workspace autonomy](guides/workspace-autonomy) |
+| Move durable Codex memories between global and repo homes | [Memory transplant](guides/memory-transplant) |
+| Operate Discord over the workspace backend | [Discord bridge](reference/discord-bridge) |
+| Maintain releases | [Operate Codex release flows](guides/operate-codex-release-flows) and `RELEASE.md` |
+
+## Current Package Surface
+
+`@peezy.tech/codex-flows` publishes:
+
+- `@peezy.tech/codex-flows`: Node/Bun app-server client and transports
+- `@peezy.tech/codex-flows/browser`: browser-safe WebSocket app-server client
+- `@peezy.tech/codex-flows/flows`: Codex-backed flow helpers
+- `@peezy.tech/codex-flows/auth`: privacy-preserving account status and login helpers
+- `@peezy.tech/codex-flows/workbench`: transport-neutral thread UX reducers and request descriptors
+- `@peezy.tech/codex-flows/workspace-backend`: workspace backend protocol helpers and capability primitives
+- `@peezy.tech/codex-flows/rpc`: JSON-RPC message helpers
+- `@peezy.tech/codex-flows/generated`: generated app-server protocol types
+- `codex-flows`: CLI for fetch, app-server calls, workspace backend calls,
+  flow inspection, workspace autonomy, and memory transplant
+
+## Workspace Autonomy In One Screen
+
+Workspace control config lives at `.codex/workspace.toml`:
+
+```toml
+[workspace]
+name = "meta-workspace"
+
+[[workspace.tasks]]
+id = "morning-brief"
+enabled = true
+kind = "skill"
+skill = "morning-brief"
+schedule = "0 14 * * *"
+var = "workspace status"
 ```
 
-## Start here
+Run it locally without changing your active Codex home:
 
-- New to flows: [Build your first flow](tutorials/first-flow).
-- Integrating a product: [Dispatch a release event](tutorials/dispatch-release-event).
-- Need exact shapes: [FlowEvent and FLOW_RESULT](reference/flow-event).
-- Operating runs: [Operate the workspace flow backend](guides/operate-workspace-flow-backend).
+```bash
+codex-flows workspace doctor
+codex-flows workspace tick --mode local
+```
 
-## What is in this repo
+Run it in CI with the repo `.codex` home:
 
-- `@peezy.tech/codex-flows`: Codex app-server JSON-RPC client, transports,
-  flow helpers, auth helpers, workbench reducers, and generated protocol types.
-- `@peezy.tech/flow-runtime`: flow manifest loading, event matching, local
-  execution, the shared flow client, and backend HTTP client normalization.
-- `@peezy.tech/flow-backend-convex`: reusable Convex control-plane component
-  for generic flow events and runs.
-- `codex-flow-runner`: CLI for discovering and firing local flow packages.
-- `codex-workspace-backend-local`: local workspace backend process with durable
-  flow dispatch, inspection, replay, and optional `systemd-run` execution.
-- `codex-discord-bridge`: Discord sidecar for routing Discord threads to Codex
-  app-server threads, workspace delegation, and flow inspection.
+```bash
+export CODEX_WORKSPACE_MODE=actions
+export CODEX_HOME="$GITHUB_WORKSPACE/.codex"
+codex-flows workspace tick --mode actions
+```
+
+Local generated state goes under `.codex/workspace/local`. Actions generated
+state goes under `.codex/workspace/actions`.
+
+## Memory Transplant In One Screen
+
+Memory transplant is dry-run by default:
+
+```bash
+codex-flows memories transplant global-to-workspace
+codex-flows memories transplant workspace-to-global
+```
+
+Apply only after reviewing the plan:
+
+```bash
+codex-flows memories transplant global-to-workspace --apply
+```
+
+The command copies only durable Codex memory artifacts:
+`MEMORY.md`, `memory_summary.md`, `raw_memories.md`, and
+`rollout_summaries/*.md`. It skips auth, logs, sessions, sqlite databases,
+skills, `.git`, generated extension machinery, and other runtime internals.
+
+## Flow Automation In One Screen
+
+Products dispatch generic events:
+
+```json
+{
+  "id": "patch:upstream.release:openai/codex:rust-v1.2.3",
+  "type": "upstream.release",
+  "source": "patch",
+  "receivedAt": "2026-05-15T00:00:00.000Z",
+  "payload": {
+    "repo": "openai/codex",
+    "tag": "rust-v1.2.3"
+  }
+}
+```
+
+Flow packages match events with `flow.toml` and JSON Schema. Steps run through a
+Bun runner or a gated Code Mode runner and print one `FLOW_RESULT`.
+
+## Boundaries
+
+- App-server client APIs call Codex thread/auth/protocol methods.
+- Flow clients and backends own generic event/run state, replay, cancellation,
+  attempts, output, and result payloads.
+- Workspace autonomy owns repo-local schedules and generated workspace state
+  under `.codex/workspace`.
+- Memory transplant owns file-based copies under `memories/` only.
+- Products own final domain completion, external credentials, deployment policy,
+  Discord routing policy, and release side effects.

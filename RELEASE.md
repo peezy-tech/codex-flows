@@ -85,18 +85,24 @@ Release packages:
 - `@peezy.tech/flow-runtime`
 - `@peezy.tech/flow-backend-convex`
 
+The GitHub publish workflow checks whether each package version already exists
+on npm. It publishes new versions and skips versions that are already present.
+For a stack release, bump all changed packages together. For a package-specific
+release, bump only the changed package and let the workflow skip the others.
+
 Before publishing:
 
 ```bash
 bun run release:check
 bun run check:types
 bun run test
+bun run docs:build
 git diff --check
 ```
 
 To publish through GitHub trusted publishing:
 
-1. Bump `packages/codex-client/package.json`, `packages/flow-runtime/package.json`, and `packages/flow-backend-convex/package.json` together when releasing the stack.
+1. Bump the package version or versions being released.
 2. Commit and push to jojo.
 3. Confirm the Codeberg mirror has received the commit.
 4. Push the same commit to GitHub.

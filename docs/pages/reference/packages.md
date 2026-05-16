@@ -1,13 +1,13 @@
 ---
 title: Packages
-description: Public and workspace packages in the codex-flow stack.
+description: Public and workspace packages in the codex-flows stack.
 ---
 
 # Packages
 
 ## `@peezy.tech/codex-flows`
 
-Low-level Codex app-server client package. It exports:
+Codex app-server client package and CLI. It exports:
 
 - app-server JSON-RPC client and stdio/WebSocket transports
 - browser-safe workspace backend client and protocol server primitives
@@ -16,6 +16,8 @@ Low-level Codex app-server client package. It exports:
 - auth helpers for account login/status/usage
 - workbench reducers and request descriptors
 - generated Codex app-server protocol types
+- the `codex-flows` CLI for fetch, app-server calls, workspace backend calls,
+  flow inspection, workspace autonomy, and memory transplant
 
 ## `@peezy.tech/flow-runtime`
 
