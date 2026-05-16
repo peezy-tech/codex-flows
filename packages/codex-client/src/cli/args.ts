@@ -1,4 +1,6 @@
 import { validateMethodName } from "./actions.ts";
+import { parseMode, type WorkspaceModeInput } from "./workspace-autonomy.ts";
+import type { MemoryTransplantDirection } from "./memories.ts";
 
 export type ParsedCli =
 	| { type: "help" }
@@ -20,6 +22,33 @@ export type ParsedCli =
 			pretty: boolean;
 	  }
 	| { type: "workspace-methods"; url: string; timeoutMs: number; pretty: boolean }
+	| {
+			type: "workspace-doctor";
+			mode?: WorkspaceModeInput;
+			workspaceRoot?: string;
+			appUrl: string;
+			workspaceUrl: string;
+			timeoutMs: number;
+			color: boolean;
+			json: boolean;
+	  }
+	| {
+			type: "workspace-tick";
+			mode?: WorkspaceModeInput;
+			workspaceRoot?: string;
+			url: string;
+			timeoutMs: number;
+			pretty: boolean;
+	  }
+	| {
+			type: "workspace-run";
+			taskId: string;
+			mode?: WorkspaceModeInput;
+			workspaceRoot?: string;
+			url: string;
+			timeoutMs: number;
+			pretty: boolean;
+	  }
 	| {
 			type: "workspace-call";
 			method: string;
@@ -81,6 +110,18 @@ export type ParsedCli =
 			url: string;
 			timeoutMs: number;
 			pretty: boolean;
+	  }
+	| {
+			type: "memories-transplant";
+			direction: MemoryTransplantDirection;
+			workspaceRoot?: string;
+			globalCodexHome?: string;
+			workspaceCodexHome?: string;
+			apply: boolean;
+			overwrite: boolean;
+			merge?: "codex";
+			backup: boolean;
+			json: boolean;
 	  };
 
 export const DEFAULT_APP_SERVER_WS_URL = "ws://127.0.0.1:3585";
@@ -106,6 +147,14 @@ export function parseArgs(
 	let status: string | undefined;
 	let limit: number | undefined;
 	let wait = false;
+	let mode: WorkspaceModeInput | undefined;
+	let workspaceRoot: string | undefined;
+	let globalCodexHome: string | undefined;
+	let workspaceCodexHome: string | undefined;
+	let apply = false;
+	let overwrite = false;
+	let merge: "codex" | undefined;
+	let backup = true;
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -183,6 +232,70 @@ export function parseArgs(
 		}
 		if (arg === "--json") {
 			json = true;
+			continue;
+		}
+		if (arg === "--mode") {
+			mode = parseMode(required(argv, ++index, arg));
+			continue;
+		}
+		if (arg.startsWith("--mode=")) {
+			mode = parseMode(arg.slice("--mode=".length));
+			continue;
+		}
+		if (arg === "--workspace-root") {
+			workspaceRoot = required(argv, ++index, arg);
+			continue;
+		}
+		if (arg.startsWith("--workspace-root=")) {
+			workspaceRoot = arg.slice("--workspace-root=".length);
+			continue;
+		}
+		if (arg === "--global-codex-home") {
+			globalCodexHome = required(argv, ++index, arg);
+			continue;
+		}
+		if (arg.startsWith("--global-codex-home=")) {
+			globalCodexHome = arg.slice("--global-codex-home=".length);
+			continue;
+		}
+		if (arg === "--workspace-codex-home") {
+			workspaceCodexHome = required(argv, ++index, arg);
+			continue;
+		}
+		if (arg.startsWith("--workspace-codex-home=")) {
+			workspaceCodexHome = arg.slice("--workspace-codex-home=".length);
+			continue;
+		}
+		if (arg === "--apply") {
+			apply = true;
+			continue;
+		}
+		if (arg === "--overwrite") {
+			overwrite = true;
+			continue;
+		}
+		if (arg === "--merge") {
+			const value = required(argv, ++index, arg);
+			if (value !== "codex") {
+				throw new Error("--merge currently supports only codex");
+			}
+			merge = "codex";
+			continue;
+		}
+		if (arg.startsWith("--merge=")) {
+			const value = arg.slice("--merge=".length);
+			if (value !== "codex") {
+				throw new Error("--merge currently supports only codex");
+			}
+			merge = "codex";
+			continue;
+		}
+		if (arg === "--backup") {
+			backup = true;
+			continue;
+		}
+		if (arg === "--no-backup") {
+			backup = false;
 			continue;
 		}
 		if (arg === "--event") {
@@ -283,6 +396,39 @@ export function parseArgs(
 		const subcommand = positionals[1];
 		if (!subcommand || subcommand === "methods") {
 			return { type: "workspace-methods", url: workspaceUrl, timeoutMs, pretty };
+		}
+		if (subcommand === "doctor") {
+			return {
+				type: "workspace-doctor",
+				mode,
+				workspaceRoot,
+				appUrl,
+				workspaceUrl,
+				timeoutMs: timeoutMs === defaultTimeoutMs ? 1_500 : timeoutMs,
+				color,
+				json,
+			};
+		}
+		if (subcommand === "tick") {
+			return {
+				type: "workspace-tick",
+				mode,
+				workspaceRoot,
+				url: workspaceUrl,
+				timeoutMs,
+				pretty,
+			};
+		}
+		if (subcommand === "run") {
+			return {
+				type: "workspace-run",
+				taskId: requiredPositional(positionals, 2, "workspace run requires <task-id>"),
+				mode,
+				workspaceRoot,
+				url: workspaceUrl,
+				timeoutMs,
+				pretty,
+			};
 		}
 		if (subcommand === "app") {
 			const method = requiredPositional(
@@ -389,6 +535,28 @@ export function parseArgs(
 			};
 		}
 		throw new Error("flow requires dispatch, events, event, replay, runs, or run");
+	}
+	if (command === "memories") {
+		const subcommand = positionals[1];
+		if (subcommand !== "transplant") {
+			throw new Error("memories requires transplant");
+		}
+		const direction = requiredPositional(positionals, 2, "memories transplant requires a direction");
+		if (direction !== "global-to-workspace" && direction !== "workspace-to-global") {
+			throw new Error(`Invalid memories transplant direction: ${direction}`);
+		}
+		return {
+			type: "memories-transplant",
+			direction,
+			workspaceRoot,
+			globalCodexHome,
+			workspaceCodexHome,
+			apply,
+			overwrite,
+			merge,
+			backup,
+			json,
+		};
 	}
 	throw new Error(`Unknown command: ${command}`);
 }

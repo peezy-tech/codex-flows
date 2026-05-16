@@ -28,6 +28,19 @@ import {
 	type FetchThreadSummary,
 	type FetchThreadsInfo,
 } from "./fetch.ts";
+import {
+	applyMemoryTransplant,
+	formatMemoryTransplantPlan,
+} from "./memories.ts";
+import {
+	collectWorkspaceDoctorInfo,
+	commitActionsWorkspaceState,
+	createWorkspaceContext,
+	formatWorkspaceDoctorInfo,
+	migrateWorkspaceConfig,
+	runWorkspaceTaskById,
+	tickWorkspace,
+} from "./workspace-autonomy.ts";
 
 await main().catch((error) => {
 	process.stderr.write(`${errorMessage(error)}\n`);
@@ -70,6 +83,54 @@ async function main(): Promise<void> {
 		writeJson({
 			advertised: initialized.capabilities.workspaceMethods,
 			common: COMMON_WORKSPACE_BACKEND_METHODS,
+		}, parsed.pretty);
+		return;
+	}
+	if (parsed.type === "workspace-doctor") {
+		const context = await createWorkspaceContext({
+			workspaceRoot: parsed.workspaceRoot,
+			mode: parsed.mode,
+		});
+		const migrated = await maybeMigrateWorkspaceConfig(context);
+		const info = await collectWorkspaceDoctorInfo(context);
+		const backend = await collectBackendInfo(parsed);
+		const result = { ...info, migratedConfig: migrated, backend };
+		write(parsed.json
+			? `${JSON.stringify(result, null, 2)}\n`
+			: `${formatWorkspaceDoctorInfo(info)}backend             ${backendLabelForDoctor(backend)}\n${migrated ? "config migration   migrated legacy discord.gateway.surfaces\n" : ""}`);
+		return;
+	}
+	if (parsed.type === "workspace-tick") {
+		const context = await createWorkspaceContext({
+			workspaceRoot: parsed.workspaceRoot,
+			mode: parsed.mode,
+		});
+		await maybeMigrateWorkspaceConfig(context);
+		const result = await tickWorkspace(context, {
+			callWorkspaceBackend: async (method, params) =>
+				await callWorkspaceBackend(method, params, parsed),
+		});
+		writeJson({
+			...result,
+			actionsCommit: await commitActionsWorkspaceState(context),
+		}, parsed.pretty);
+		return;
+	}
+	if (parsed.type === "workspace-run") {
+		const context = await createWorkspaceContext({
+			workspaceRoot: parsed.workspaceRoot,
+			mode: parsed.mode,
+		});
+		await maybeMigrateWorkspaceConfig(context);
+		const run = await runWorkspaceTaskById(context, parsed.taskId, {
+			callWorkspaceBackend: async (method, params) =>
+				await callWorkspaceBackend(method, params, parsed),
+		});
+		writeJson({
+			run,
+			actionsCommit: await commitActionsWorkspaceState(context, {
+				message: `Update Codex workspace state for ${parsed.taskId}`,
+			}),
 		}, parsed.pretty);
 		return;
 	}
@@ -152,7 +213,32 @@ async function main(): Promise<void> {
 			await callWorkspaceBackend("flow.getRun", { runId: parsed.runId }, parsed),
 			parsed.pretty,
 		);
+		return;
 	}
+	if (parsed.type === "memories-transplant") {
+		const plan = await applyMemoryTransplant(parsed);
+		write(parsed.json
+			? `${JSON.stringify(plan, null, 2)}\n`
+			: formatMemoryTransplantPlan(plan));
+		return;
+	}
+}
+
+async function maybeMigrateWorkspaceConfig(
+	context: Awaited<ReturnType<typeof createWorkspaceContext>>,
+): Promise<boolean> {
+	try {
+		return await migrateWorkspaceConfig(context);
+	} catch {
+		return false;
+	}
+}
+
+function backendLabelForDoctor(backend: FetchBackendInfo): string {
+	if (backend.status === "connected") {
+		return backend.url ? `${backend.mode} connected (${backend.url})` : `${backend.mode} connected`;
+	}
+	return backend.error ? `unavailable (${backend.error})` : "unavailable";
 }
 
 async function callAppServer(
@@ -691,6 +777,12 @@ Usage:
   codex-flows workspace call <method> [params-json]
   codex-flows workspace app <method> [params-json]
   codex-flows workspace methods
+  codex-flows workspace doctor [--mode auto|local|actions] [--json]
+  codex-flows workspace tick [--mode auto|local|actions]
+  codex-flows workspace run <task-id> [--mode auto|local|actions]
+
+  codex-flows memories transplant global-to-workspace [--apply]
+  codex-flows memories transplant workspace-to-global [--apply]
 
   codex-flows flow dispatch --event <event.json>
   codex-flows flow events [--type <type>] [--limit <n>]
@@ -715,6 +807,14 @@ Options:
   --pretty                                   Print pretty JSON.
   --json                                     Print JSON for fetch.
   --no-color                                 Disable ANSI colors for fetch.
+  --mode <auto|local|actions>                Workspace execution mode.
+  --workspace-root <path>                    Workspace root. Defaults to discovery.
+  --global-codex-home <path>                 Global Codex home for memories transplant.
+  --workspace-codex-home <path>              Workspace Codex home for memories transplant.
+  --apply                                    Apply memory transplant changes.
+  --overwrite                                Replace destination memory files after backup.
+  --merge codex                              Merge MEMORY.md and memory_summary.md with Codex.
+  --no-backup                                Disable overwrite/merge backups.
   -h, --help                                 Show this help.
 
 Examples:
@@ -723,6 +823,8 @@ Examples:
   codex-flows app thread/list '{"limit":20,"sourceKinds":[]}'
   codex-flows workspace app thread/list '{"limit":20,"sourceKinds":[]}'
   codex-flows workspace delegation.list
+  codex-flows workspace doctor --mode actions
+  codex-flows memories transplant global-to-workspace
   codex-flows flow events --limit 20
 `;
 }

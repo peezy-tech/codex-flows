@@ -58,6 +58,25 @@ List available actions:
 bun apps/cli/src/index.ts actions
 ```
 
+Run repo-native workspace autonomy commands from the publishable CLI:
+
+```bash
+codex-flows workspace doctor
+codex-flows workspace tick --mode local
+codex-flows workspace run morning-brief --mode actions
+codex-flows memories transplant global-to-workspace
+```
+
+Workspace control config lives in `.codex/workspace.toml`. Local mode preserves
+the active `CODEX_HOME` and writes generated state under
+`.codex/workspace/local`; actions mode uses the repo `.codex` as `CODEX_HOME`
+and writes generated state under `.codex/workspace/actions`. Memory transplant
+is dry-run by default. It is file-based and intentionally limited to durable
+memory artifacts: `MEMORY.md`, `memory_summary.md`, `raw_memories.md`, and
+`rollout_summaries/*.md`. It does not copy Codex runtime internals such as
+`memories/.git`, sqlite databases, auth files, logs, sessions, skills, generated
+extension machinery, or transient Phase 2 diff files.
+
 ## Build And Test
 
 ```bash

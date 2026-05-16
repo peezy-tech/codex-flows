@@ -1,4 +1,10 @@
 import os from "node:os";
+import path from "node:path";
+import {
+	collectWorkspaceDoctorInfo,
+	createWorkspaceContext,
+	type WorkspaceDoctorInfo,
+} from "./workspace-autonomy.ts";
 
 export type FetchInfo = {
 	package: string;
@@ -14,6 +20,7 @@ export type FetchInfo = {
 	appServerUrl: string;
 	workspaceBackendUrl: string;
 	codexHome: string;
+	workspace?: WorkspaceDoctorInfo;
 	backend: FetchBackendInfo;
 };
 
@@ -86,6 +93,13 @@ export async function collectFetchInfo(
 ): Promise<FetchInfo> {
 	const env = options.env ?? process.env;
 	const packageJson = await readPackageJson();
+	const workspaceContext = await createWorkspaceContext({
+		workspaceRoot: options.cwd,
+		env,
+	}).catch(() => undefined);
+	const workspace = workspaceContext
+		? await collectWorkspaceDoctorInfo(workspaceContext).catch(() => undefined)
+		: undefined;
 	return {
 		package: packageJson.name,
 		version: packageJson.version,
@@ -100,6 +114,7 @@ export async function collectFetchInfo(
 		appServerUrl: options.appUrl,
 		workspaceBackendUrl: options.workspaceUrl,
 		codexHome: env.CODEX_HOME ?? defaultCodexHome(),
+		...(workspace ? { workspace } : {}),
 		backend: options.backend ?? {
 			mode: "local",
 			status: "unavailable",
@@ -125,6 +140,14 @@ export function formatFetchInfo(
 		["app-server", info.appServerUrl],
 		["workspace", info.workspaceBackendUrl],
 		["CODEX_HOME", info.codexHome],
+		...(info.workspace
+			? [
+					["workspace mode", info.workspace.mode],
+					["workspace root", info.workspace.repoRoot],
+					["state root", info.workspace.stateRoot],
+					["tasks", `${info.workspace.taskCount} configured, ${info.workspace.dueCount} due, ${info.workspace.failingCount} failing`],
+				] as Array<[string, string]>
+			: []),
 		["backend", backendLabel(info.backend)],
 		...backendRows(info.backend),
 	];
@@ -236,7 +259,7 @@ function bunVersion(): string {
 }
 
 function defaultCodexHome(): string {
-	return process.env.HOME ? `${process.env.HOME}/.codex` : "default";
+	return process.env.HOME ? path.join(process.env.HOME, ".codex") : "default";
 }
 
 function palette(enabled: boolean): {
