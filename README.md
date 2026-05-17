@@ -16,6 +16,7 @@ instead of being bundled into it. The full user documentation lives in the Tome 
 - CLI reference: [`docs/pages/reference/cli.md`](docs/pages/reference/cli.md).
 - Workspace autonomy: [`docs/pages/guides/workspace-autonomy.md`](docs/pages/guides/workspace-autonomy.md).
 - Memory transplant: [`docs/pages/guides/memory-transplant.md`](docs/pages/guides/memory-transplant.md).
+- Thread transplant: [`docs/pages/guides/thread-transplant.md`](docs/pages/guides/thread-transplant.md).
 - Pack repos: [`docs/pages/guides/install-pack-repos.md`](docs/pages/guides/install-pack-repos.md).
 - Single-package platform: [`docs/pages/concepts/single-package-platform.md`](docs/pages/concepts/single-package-platform.md).
 - Maintainers and release operators: [`RELEASE.md`](RELEASE.md).
@@ -76,6 +77,7 @@ bun packages/codex-client/src/cli/index.ts --help
 codex-flows fetch
 codex-flows workspace doctor
 codex-flows memories transplant global-to-workspace
+codex-flows threads export <thread-id> --output ./thread-bundle
 codex-flows pack inspect owner/repo
 ```
 
@@ -86,8 +88,8 @@ docs site:
 
 - Tutorials teach a first successful workflow.
 - Guides cover operational tasks such as workspace autonomy, memory transplant,
-  pack repo install, local backend operation, Discord bridge operation, and
-  release flow operation.
+  thread transplant, pack repo install, local backend operation, Discord bridge
+  operation, and release flow operation.
 - Reference pages define CLI commands, package exports, backend APIs,
   `FlowEvent`, `FLOW_RESULT`, and `flow.toml`.
 - Concepts explain boundaries between app-server clients, flow automation,

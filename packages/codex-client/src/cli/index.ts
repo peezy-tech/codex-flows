@@ -49,6 +49,16 @@ import {
 	listInstalledPacks,
 } from "./pack.ts";
 import {
+	exportThreadBundle,
+	formatThreadBundleExport,
+	formatThreadBundleImport,
+	formatThreadBundleInspection,
+	formatThreadRolloutLocation,
+	importThreadBundle,
+	inspectThreadBundle,
+	locateThreadRollout,
+} from "../threads.ts";
+import {
 	collectWorkspaceDoctorInfo,
 	commitActionsWorkspaceState,
 	createWorkspaceContext,
@@ -297,6 +307,34 @@ async function main(): Promise<void> {
 		write(parsed.json
 			? `${JSON.stringify(plan, null, 2)}\n`
 			: formatMemoryTransplantPlan(plan));
+		return;
+	}
+	if (parsed.type === "threads-locate") {
+		const location = await locateThreadRollout(parsed);
+		write(parsed.json
+			? `${JSON.stringify(location, null, 2)}\n`
+			: formatThreadRolloutLocation(location));
+		return;
+	}
+	if (parsed.type === "threads-export") {
+		const result = await exportThreadBundle(parsed);
+		write(parsed.json
+			? `${JSON.stringify(result, null, 2)}\n`
+			: formatThreadBundleExport(result));
+		return;
+	}
+	if (parsed.type === "threads-inspect") {
+		const result = await inspectThreadBundle(parsed);
+		write(parsed.json
+			? `${JSON.stringify(result, null, 2)}\n`
+			: formatThreadBundleInspection(result));
+		return;
+	}
+	if (parsed.type === "threads-import") {
+		const result = await importThreadBundle(parsed);
+		write(parsed.json
+			? `${JSON.stringify(result, null, 2)}\n`
+			: formatThreadBundleImport(result));
 		return;
 	}
 	if (parsed.type === "pack-inspect") {
@@ -895,6 +933,11 @@ Usage:
   codex-flows memories transplant global-to-workspace [--apply]
   codex-flows memories transplant workspace-to-global [--apply]
 
+  codex-flows threads locate <thread-id> [--codex-home <home>]
+  codex-flows threads export <thread-id> --output <bundle-dir> [--codex-home <home>]
+  codex-flows threads inspect <bundle-dir>
+  codex-flows threads import <bundle-dir> [--codex-home <home>] [--replace]
+
   codex-flows pack inspect <source> [--json]
   codex-flows pack add <source> [--apply] [--include <name>] [--exclude <name>]
   codex-flows pack doctor [--json]
@@ -921,16 +964,19 @@ Options:
                                              or 1500 for fetch probes.
   --compact                                  Print compact JSON.
   --pretty                                   Print pretty JSON.
-  --json                                     Print JSON for fetch.
+  --json                                     Print JSON for supported commands.
   --no-color                                 Disable ANSI colors for fetch.
   --mode <auto|local|actions>                Workspace execution mode.
   --workspace-root <path>                    Workspace root. Defaults to discovery.
   --global-codex-home <path>                 Global Codex home for memories transplant.
   --workspace-codex-home <path>              Workspace Codex home for memories transplant.
+  --codex-home <path>                        Codex home for thread transplant.
+  --output <path>                            Output bundle directory for threads export.
   --apply                                    Apply memory transplant changes.
   --overwrite                                Replace destination memory files after backup.
                                              For pack add, replace changed installed item dirs
                                              after backup under .codex/pack-backups.
+  --replace                                  Replace an existing imported thread rollout after backup.
   --ref <ref>                                Git ref for non-local pack sources.
   --include <name>                           Include a pack item by name or kind:name.
   --exclude <name>                           Exclude a pack item by name or kind:name.
@@ -955,6 +1001,8 @@ Examples:
   codex-flows workspace init actions --forgejo --with-smoke --with-agent-turn
   codex-flows actions dispatch --event .codex/workspace/actions/events/manual.json
   codex-flows memories transplant global-to-workspace
+  codex-flows threads export 019e3654-1492-70d0-9b01-46b17d6444a9 --output ./thread-bundle
+  codex-flows threads import ./thread-bundle --codex-home ./.codex
   codex-flows pack inspect owner/repo
   codex-flows pack add ./capability-pack --apply
   codex-flows flow events --limit 20

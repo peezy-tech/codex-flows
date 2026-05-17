@@ -18,9 +18,10 @@ exports:
 - Actions-mode workspace helpers under `@peezy.tech/codex-flows/actions`
 - stable Codex memory artifact helpers under `@peezy.tech/codex-flows/memories`
 - workbench reducers and request descriptors
+- thread rollout bundle helpers under `@peezy.tech/codex-flows/threads`
 - generated Codex app-server protocol types
 - the `codex-flows` CLI for fetch, app-server calls, workspace backend calls,
-  flow inspection, workspace autonomy, Actions helpers, and memory transplant
+  flow inspection, workspace autonomy, memory transplant, and thread transplant
 - runnable core process bins:
   - `codex-app`
   - `codex-flow-runner`
@@ -79,6 +80,18 @@ Stable artifacts are `memories/raw_memories.md` and
 `memories/rollout_summaries/*.md`. The helpers do not require
 `MEMORY.md` or `memory_summary.md`, and cleanup removes runtime-only memory
 files such as SQLite databases, `.git`, and `phase2_workspace_diff.md`.
+
+## `@peezy.tech/codex-flows/threads`
+
+Thread transplant helpers for:
+
+- locating a Codex rollout JSONL by thread id under `CODEX_HOME/sessions`
+- exporting a directory bundle with `manifest.json`
+- inspecting bundle byte lengths and sha256 checksums
+- importing a rollout to the same relative path under another `CODEX_HOME`
+
+The helpers preserve raw rollout bytes and thread ids. They do not reconstruct
+history, rewrite ids, or call app-server import APIs.
 
 ## `@peezy.tech/flow-runtime`
 

@@ -24,6 +24,7 @@ export default {
 				"guides/dispatch-and-replay-events",
 				"guides/workspace-autonomy",
 				"guides/memory-transplant",
+				"guides/thread-transplant",
 				"guides/install-pack-repos",
 				"guides/operate-workspace-flow-backend",
 				"guides/use-convex-backend",

@@ -13,7 +13,7 @@ four related surfaces:
 - generic flow automation built around `FlowEvent`, `flow.toml`, and
   `FLOW_RESULT`
 - workspace backend and Discord operation for long-running workspace control
-- repo-native workspace autonomy and Codex memory transplant tools
+- repo-native workspace autonomy and Codex memory/thread transplant tools
 - repo-local pack installation for skills, flows, plugins, and hooks
 
 The project keeps product-specific completion outside the generic layer. Flow
@@ -32,6 +32,7 @@ credentials, domain state, release policy, and final side effects.
 | Run a local flow backend | [Operate the workspace flow backend](guides/operate-workspace-flow-backend) |
 | Schedule repo-local workspace tasks | [Workspace autonomy](guides/workspace-autonomy) |
 | Move durable Codex memories between global and repo homes | [Memory transplant](guides/memory-transplant) |
+| Move a Codex thread rollout between Codex homes | [Thread transplant](guides/thread-transplant) |
 | Install reusable skills, flows, plugins, and hooks into a workspace | [Install pack repos](guides/install-pack-repos) |
 | Operate Discord over the workspace backend | [Discord bridge](reference/discord-bridge) |
 | Broadcast workspace updates into Discord voice | [Workspace voice gateway](reference/workspace-voice-gateway) |
@@ -49,12 +50,13 @@ credentials, domain state, release policy, and final side effects.
 - `@peezy.tech/codex-flows/actions`: Actions-mode workspace helpers
 - `@peezy.tech/codex-flows/memories`: stable Codex memory artifact helpers
 - `@peezy.tech/codex-flows/workbench`: transport-neutral thread UX reducers and request descriptors
+- `@peezy.tech/codex-flows/threads`: raw rollout bundle import/export helpers
 - `@peezy.tech/codex-flows/workspace-backend`: workspace backend protocol helpers and capability primitives
 - `@peezy.tech/codex-flows/flow-runtime`: local flow runtime, clients, and Bun helpers
 - `@peezy.tech/codex-flows/rpc`: JSON-RPC message helpers
 - `@peezy.tech/codex-flows/generated`: generated app-server protocol types
 - `codex-flows`: CLI for fetch, app-server calls, workspace backend calls,
-  flow inspection, workspace autonomy, Actions helpers, memory transplant,
+  flow inspection, workspace autonomy, memory transplant, thread transplant,
   and pack repo install
 - `codex-workspace-backend-local`: local workspace backend process
 - `codex-app`: app-server JSON-RPC utility CLI
@@ -125,6 +127,21 @@ The command copies only durable Codex memory artifacts:
 `rollout_summaries/*.md`. It skips auth, logs, sessions, sqlite databases,
 skills, `.git`, generated extension machinery, and other runtime internals.
 
+## Thread Transplant In One Screen
+
+Thread transplant moves one Codex thread rollout between Codex homes:
+
+```bash
+codex-flows threads locate <thread-id> --codex-home ~/.codex
+codex-flows threads export <thread-id> --codex-home ~/.codex --output ./thread-bundle
+codex-flows threads inspect ./thread-bundle
+codex-flows threads import ./thread-bundle --codex-home ./workspace/.codex
+```
+
+The bundle is a directory containing `manifest.json` and the original
+`sessions/.../rollout-*.jsonl` file. Import preserves the thread id and fails on
+conflicts unless `--replace` is provided.
+
 ## Pack Install In One Screen
 
 Pack repos collect reusable Codex capabilities for installation into a workspace
@@ -176,6 +193,7 @@ turns.
 - Workspace autonomy owns repo-local schedules and generated workspace state
   under `.codex/workspace`.
 - Memory transplant owns file-based copies under `memories/` only.
+- Thread transplant owns byte-preserving rollout copies under `sessions/` only.
 - Pack install owns repo-local capability copies and `.codex/pack-lock.json`.
 - Products own final domain completion, external credentials, deployment policy,
   Discord routing policy, and release side effects.

@@ -14,27 +14,6 @@ describe("codex-flows CLI args", () => {
 				paramsText: "{\"limit\":1}",
 				url: "ws://127.0.0.1:3585",
 			});
-
-async function runCli(
-	args: string[],
-	env: Record<string, string | undefined> = {},
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-	const proc = Bun.spawn({
-		cmd: [process.execPath, path.resolve(import.meta.dir, "../src/cli/index.ts"), ...args],
-		env: {
-			...process.env,
-			...env,
-		},
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr, exitCode] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { exitCode, stdout, stderr };
-}
 	});
 
 	test("parses workspace-owned method calls", () => {
@@ -164,6 +143,49 @@ async function runCli(
 			.toBe("keep\n");
 	});
 
+	test("parses thread transplant commands", () => {
+		expect(parseArgs(["threads", "locate", "thread-1", "--codex-home", "/source", "--json"], {}))
+			.toEqual({
+				type: "threads-locate",
+				threadId: "thread-1",
+				codexHome: "/source",
+				json: true,
+			});
+		expect(parseArgs([
+			"threads",
+			"export",
+			"thread-1",
+			"--codex-home=/source",
+			"--output",
+			"/bundle",
+		], {})).toEqual({
+			type: "threads-export",
+			threadId: "thread-1",
+			codexHome: "/source",
+			outputDir: "/bundle",
+			json: false,
+		});
+		expect(parseArgs(["threads", "inspect", "/bundle", "--json"], {})).toEqual({
+			type: "threads-inspect",
+			bundleDir: "/bundle",
+			json: true,
+		});
+		expect(parseArgs([
+			"threads",
+			"import",
+			"/bundle",
+			"--codex-home",
+			"/target",
+			"--replace",
+		], {})).toEqual({
+			type: "threads-import",
+			bundleDir: "/bundle",
+			codexHome: "/target",
+			replace: true,
+			json: false,
+		});
+	});
+
 	test("parses pack commands", () => {
 		expect(parseArgs(["pack", "inspect", "owner/repo", "--ref", "main", "--json"], {}))
 			.toEqual({
@@ -277,3 +299,24 @@ async function runCli(
 		expect(output).not.toContain("\x1b[");
 	});
 });
+
+async function runCli(
+	args: string[],
+	env: Record<string, string | undefined> = {},
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+	const proc = Bun.spawn({
+		cmd: [process.execPath, path.resolve(import.meta.dir, "../src/cli/index.ts"), ...args],
+		env: {
+			...process.env,
+			...env,
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	return { exitCode, stdout, stderr };
+}

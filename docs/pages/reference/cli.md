@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: Commands for app-server calls, workspace backend calls, flow inspection, workspace autonomy, memory transplant, and pack repos.
+description: Commands for app-server calls, workspace backend calls, flow inspection, workspace autonomy, memory transplant, thread transplant, and pack repos.
 ---
 
 # CLI reference
@@ -127,6 +127,22 @@ The command is dry-run by default. It copies only durable memory artifacts under
 `memories/`: `MEMORY.md`, `memory_summary.md`, `raw_memories.md`, and
 `rollout_summaries/*.md`. See [Memory transplant](../guides/memory-transplant).
 
+## Thread Transplant
+
+```bash
+codex-flows threads locate <thread-id> [--codex-home <home>]
+codex-flows threads export <thread-id> --output <bundle-dir> [--codex-home <home>]
+codex-flows threads inspect <bundle-dir>
+codex-flows threads import <bundle-dir> [--codex-home <home>] [--replace]
+```
+
+Thread transplant copies raw Codex rollout JSONL files between `CODEX_HOME`
+roots. Export creates a directory bundle with `manifest.json` and the original
+`sessions/.../rollout-*.jsonl` path. Inspect validates the manifest, byte
+length, checksum, and safe paths. Import writes the rollout to the same relative
+path under the target Codex home, failing on conflicts unless `--replace` is
+set. See [Thread transplant](../guides/thread-transplant).
+
 ## Pack Repos
 
 ```bash
@@ -221,8 +237,11 @@ codex-app thread/list '{"limit":20,"sourceKinds":[]}'
 | `--workspace-root <path>` | Workspace root. Defaults to discovery. |
 | `--global-codex-home <path>` | Global Codex home for memory transplant. |
 | `--workspace-codex-home <path>` | Workspace Codex home for memory transplant. |
+| `--codex-home <path>` | Codex home for thread transplant. |
+| `--output <path>` | Output bundle directory for `threads export`. |
 | `--apply` | Apply memory transplant or pack install changes. |
 | `--overwrite` | Replace destination memory files or changed pack item directories after backup. |
+| `--replace` | Replace an existing imported thread rollout after backup. |
 | `--ref <ref>` | Git ref for non-local pack sources. |
 | `--include <name>` | Include a pack item by name or `kind:name`. |
 | `--exclude <name>` | Exclude a pack item by name or `kind:name`. |

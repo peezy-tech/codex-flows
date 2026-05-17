@@ -158,6 +158,31 @@ export type ParsedCli =
 			json: boolean;
 	  }
 	| {
+			type: "threads-locate";
+			threadId: string;
+			codexHome?: string;
+			json: boolean;
+	  }
+	| {
+			type: "threads-export";
+			threadId: string;
+			codexHome?: string;
+			outputDir: string;
+			json: boolean;
+	  }
+	| {
+			type: "threads-inspect";
+			bundleDir: string;
+			json: boolean;
+	  }
+	| {
+			type: "threads-import";
+			bundleDir: string;
+			codexHome?: string;
+			replace: boolean;
+			json: boolean;
+	  }
+	| {
 			type: "pack-inspect";
 			source: string;
 			ref?: string;
@@ -215,8 +240,11 @@ export function parseArgs(
 	let workspaceRoot: string | undefined;
 	let globalCodexHome: string | undefined;
 	let workspaceCodexHome: string | undefined;
+	let codexHome: string | undefined;
+	let outputDir: string | undefined;
 	let apply = false;
 	let overwrite = false;
+	let replace = false;
 	let merge: "codex" | undefined;
 	let backup = true;
 	let ref: string | undefined;
@@ -337,12 +365,32 @@ export function parseArgs(
 			workspaceCodexHome = arg.slice("--workspace-codex-home=".length);
 			continue;
 		}
+		if (arg === "--codex-home") {
+			codexHome = required(argv, ++index, arg);
+			continue;
+		}
+		if (arg.startsWith("--codex-home=")) {
+			codexHome = arg.slice("--codex-home=".length);
+			continue;
+		}
+		if (arg === "--output") {
+			outputDir = required(argv, ++index, arg);
+			continue;
+		}
+		if (arg.startsWith("--output=")) {
+			outputDir = arg.slice("--output=".length);
+			continue;
+		}
 		if (arg === "--apply") {
 			apply = true;
 			continue;
 		}
 		if (arg === "--overwrite") {
 			overwrite = true;
+			continue;
+		}
+		if (arg === "--replace") {
+			replace = true;
 			continue;
 		}
 		if (arg === "--ref") {
@@ -748,6 +796,47 @@ export function parseArgs(
 			backup,
 			json,
 		};
+	}
+	if (command === "threads") {
+		const subcommand = positionals[1];
+		if (subcommand === "locate") {
+			return {
+				type: "threads-locate",
+				threadId: requiredPositional(positionals, 2, "threads locate requires <thread-id>"),
+				codexHome,
+				json,
+			};
+		}
+		if (subcommand === "export") {
+			return {
+				type: "threads-export",
+				threadId: requiredPositional(positionals, 2, "threads export requires <thread-id>"),
+				codexHome,
+				outputDir: outputDir ?? requiredPositional(
+					positionals,
+					3,
+					"threads export requires --output <bundle-dir>",
+				),
+				json,
+			};
+		}
+		if (subcommand === "inspect") {
+			return {
+				type: "threads-inspect",
+				bundleDir: requiredPositional(positionals, 2, "threads inspect requires <bundle-dir>"),
+				json,
+			};
+		}
+		if (subcommand === "import") {
+			return {
+				type: "threads-import",
+				bundleDir: requiredPositional(positionals, 2, "threads import requires <bundle-dir>"),
+				codexHome,
+				replace,
+				json,
+			};
+		}
+		throw new Error("threads requires locate, export, inspect, or import");
 	}
 	if (command === "pack") {
 		const subcommand = positionals[1];

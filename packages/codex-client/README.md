@@ -20,6 +20,7 @@ Full documentation lives in the repo docs site:
 - package reference: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/reference/packages.md>
 - workspace autonomy: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/workspace-autonomy.md>
 - memory transplant: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/memory-transplant.md>
+- thread transplant: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/thread-transplant.md>
 - pack repos: <https://github.com/peezy-tech/codex-flows/blob/main/docs/pages/guides/install-pack-repos.md>
 
 ## Exports
@@ -31,6 +32,7 @@ Full documentation lives in the repo docs site:
 | `@peezy.tech/codex-flows/flows` | Helpers for starting Codex-backed flow work. |
 | `@peezy.tech/codex-flows/auth` | Privacy-preserving Codex account login, status, and usage helpers. |
 | `@peezy.tech/codex-flows/workbench` | Transport-neutral thread UX reducers and app-server request descriptors. |
+| `@peezy.tech/codex-flows/threads` | Raw Codex rollout bundle export, inspect, locate, and import helpers. |
 | `@peezy.tech/codex-flows/workspace-backend` | Workspace backend protocol server/client helpers and capability primitives. |
 | `@peezy.tech/codex-flows/flow-runtime` | Flow package discovery, trigger matching, local execution, and flow result helpers. |
 | `@peezy.tech/codex-flows/flow-runtime/*` | Flow runtime client, local-client, backend-client, Bun helper, and runner subpaths. |
@@ -142,6 +144,7 @@ codex-flows workspace app thread/list '{"limit":20,"sourceKinds":[]}'
 codex-flows workspace doctor
 codex-flows workspace tick --mode local
 codex-flows memories transplant global-to-workspace
+codex-flows threads export <thread-id> --output ./thread-bundle
 codex-flows pack inspect owner/repo
 codex-flows pack add ./engineering-capabilities --apply
 codex-flows flow events --limit 20
