@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_package:
-        description: "Type publish-codex-flow-packages to publish"
+        description: "Type a package name to publish, or publish-codex-flow-packages for all"
         required: true
         type: string
 
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   publish:
-    if: inputs.confirm_package == 'publish-codex-flow-packages'
+    if: inputs.confirm_package == 'publish-codex-flow-packages' || inputs.confirm_package == '@peezy.tech/codex-flows' || inputs.confirm_package == '@peezy.tech/codex-discord-bridge' || inputs.confirm_package == '@peezy.tech/codex-workspace-voice-gateway' || inputs.confirm_package == '@peezy.tech/flow-runtime' || inputs.confirm_package == '@peezy.tech/flow-backend-convex'
     runs-on: ubuntu-latest
     environment: npm-publish
     steps:
@@ -42,6 +42,7 @@ jobs:
         run: bun run release:check
 
       - name: Publish @peezy.tech/codex-flows
+        if: inputs.confirm_package == 'publish-codex-flow-packages' || inputs.confirm_package == '@peezy.tech/codex-flows'
         working-directory: packages/codex-client
         run: |
           version=$(node -p "require('./package.json').version")
@@ -52,6 +53,7 @@ jobs:
           fi
 
       - name: Publish @peezy.tech/codex-discord-bridge
+        if: inputs.confirm_package == 'publish-codex-flow-packages' || inputs.confirm_package == '@peezy.tech/codex-discord-bridge'
         working-directory: apps/discord-bridge
         run: |
           version=$(node -p "require('./package.json').version")
@@ -62,6 +64,7 @@ jobs:
           fi
 
       - name: Publish @peezy.tech/codex-workspace-voice-gateway
+        if: inputs.confirm_package == 'publish-codex-flow-packages' || inputs.confirm_package == '@peezy.tech/codex-workspace-voice-gateway'
         working-directory: apps/workspace-voice-gateway
         run: |
           version=$(node -p "require('./package.json').version")
@@ -72,6 +75,7 @@ jobs:
           fi
 
       - name: Publish @peezy.tech/flow-runtime
+        if: inputs.confirm_package == 'publish-codex-flow-packages' || inputs.confirm_package == '@peezy.tech/flow-runtime'
         working-directory: packages/flow-runtime
         run: |
           version=$(node -p "require('./package.json').version")
@@ -82,6 +86,7 @@ jobs:
           fi
 
       - name: Publish @peezy.tech/flow-backend-convex
+        if: inputs.confirm_package == 'publish-codex-flow-packages' || inputs.confirm_package == '@peezy.tech/flow-backend-convex'
         working-directory: packages/flow-backend-convex
         run: |
           version=$(node -p "require('./package.json').version")
